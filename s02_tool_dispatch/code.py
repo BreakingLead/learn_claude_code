@@ -99,10 +99,13 @@ def run_bash(command: str) -> str:
 
 
 def run_read(path, limit=None):
-    lines = safe_path(path).read_text().splitlines()
-    if limit:
-        lines = lines[:limit]
-    return "\n".join(lines)
+    try:
+        lines = safe_path(path).read_text().splitlines()
+        if limit:
+            lines = lines[:limit]
+        return "\n".join(lines)
+    except Exception as e:
+        return f"Error: {e}"
 
 
 def run_write(path, content):
