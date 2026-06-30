@@ -13,10 +13,9 @@ from rich import print
 from rich.markdown import Markdown
 from rich.prompt import Prompt
 
-from .permission import check_permission
-from .hooks import trigger_hooks
-
 from .constants import MODEL, SYSTEM
+from .hooks import trigger_hooks
+from .permission import permission_hook
 from .tools import TOOL_HANDLERS, TOOLS
 
 load_dotenv(override=True)
@@ -105,7 +104,7 @@ def agent_loop(messages: List[MessageParam]):
 
 # ── Entry point ──────────────────────────────────────────
 def main():
-    print("[bold]s06: Hooks[/bold]")
+    print("[bold]s06: subagent[/bold]")
     print("输入问题，回车发送。输入 q 退出。\n")
 
     # history 保存完整的对话历史（user/assistant 交替），供多轮对话使用
