@@ -1,10 +1,20 @@
 from typing import List
 
 import anthropic
-from anthropic.types import MessageParam, ThinkingBlock
+from anthropic.types import (
+    ContentBlock,
+    MessageParam,
+    ThinkingBlock,
+    ToolResultBlockParam,
+)
 from dotenv import load_dotenv
+from loguru import logger
+from rich import print
+from rich.markdown import Markdown
+from rich.prompt import Prompt
 
 from s03_permissions.permission import check_permission
+from s04_hooks.hooks import trigger_hooks
 
 from .constants import MODEL, SYSTEM
 from .tools import TOOL_HANDLERS, TOOLS
@@ -33,45 +43,43 @@ def agent_loop(messages: List[MessageParam]):
         if res.stop_reason != "tool_use":
             return
 
-        results = []
+        tool_results: List[ToolResultBlockParam] = []
 
         for block in res.content:
             if block.type != "tool_use":
                 continue
 
-            print(f"\033[36m> Tool Calling: {block.name}\033[0m")
-
-            if block.name not in TOOL_HANDLERS:
-                print(f"Unknown tool: {block.name}")
-                continue
-
-            if not check_permission(block):
-                results.append(
+            pre_tool_use_result = trigger_hooks("PreToolUse", block)
+            if pre_tool_use_result is not None:
+                tool_results.append(
                     {
                         "type": "tool_result",
                         "tool_use_id": block.id,
-                        "content": "Permission denied.",
+                        "content": pre_tool_use_result,
                     }
                 )
                 continue
 
-            output = (
-                TOOL_HANDLERS[block.name](**block.input)
-                if block.name in TOOL_HANDLERS
-                else f"Unknown tool {block.name}"
+            if block.name not in TOOL_HANDLERS:
+                logger.warning("Unknown tool: {}", block.name)
+                continue
+
+            tool_output_content = TOOL_HANDLERS[block.name](**block.input)
+            logger.debug("Tool Output: {}", str(tool_output_content)[:200])
+            tool_results.append(
+                {
+                    "type": "tool_result",
+                    "tool_use_id": block.id,
+                    "content": tool_output_content,
+                }
             )
 
-            print("Tool Output: " + str(output)[:200])
-
-            results.append(
-                {"type": "tool_result", "tool_use_id": block.id, "content": output}
-            )
-        messages.append({"role": "user", "content": results})
+        messages.append({"role": "user", "content": tool_results})
 
 
 # ── Entry point ──────────────────────────────────────────
 def main():
-    print("s03: Permissions — 在 s02 基础上加了权限控制")
+    print("[bold]s04: Hooks[/bold]")
     print("输入问题，回车发送。输入 q 退出。\n")
 
     # history 保存完整的对话历史（user/assistant 交替），供多轮对话使用
@@ -81,13 +89,13 @@ def main():
     while True:
         try:
             # 显示带颜色的提示符，等待用户输入
-            query = input("\033[36ms03 >> \033[0m")
+            query = Prompt.ask("[cyan]s04 >>[/cyan]")
+            trigger_hooks("UserPromptSubmit", query)
+            # 空输入、"q"、"exit" 均退出
+            if query.strip().lower() in ("q", "exit", ""):
+                break
         except EOFError, KeyboardInterrupt:
             # Ctrl+D 或 Ctrl+C 时优雅退出
-            break
-
-        # 空输入、"q"、"exit" 均退出
-        if query.strip().lower() in ("q", "exit", ""):
             break
 
         # 将用户消息追加到历史，然后启动 agent loop
@@ -102,9 +110,10 @@ def main():
             for block in response_content:
                 # if getattr(block, "type", None) == "text":
                 if isinstance(block, ThinkingBlock):
-                    print(block.thinking)
+                    print(f"[u]Thinking: {block.thinking}[/u]")
+                    print()
                 else:
-                    print(block.text)
+                    print(Markdown(block.text))
         print()
 
 

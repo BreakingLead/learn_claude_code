@@ -1,7 +1,8 @@
 import os
 import subprocess
 from pathlib import Path
-from typing import Callable, List
+from collections.abc import Callable
+from typing import List
 
 from anthropic.types import ToolParam
 from typing_extensions import Dict
