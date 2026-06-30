@@ -41,7 +41,13 @@ def agent_loop(messages: List[MessageParam]):
             }
         )
         if res.stop_reason != "tool_use":
-            return
+            # end
+            force_continue_msg = trigger_hooks("Stop", messages)
+            if force_continue_msg is not None:
+                messages.append({"role": "user", "content": force_continue_msg})
+                continue
+            else:
+                return
 
         tool_results: List[ToolResultBlockParam] = []
 
@@ -49,13 +55,13 @@ def agent_loop(messages: List[MessageParam]):
             if block.type != "tool_use":
                 continue
 
-            pre_tool_use_result = trigger_hooks("PreToolUse", block)
-            if pre_tool_use_result is not None:
+            deny_reason = trigger_hooks("PreToolUse", block)
+            if deny_reason is not None:
                 tool_results.append(
                     {
                         "type": "tool_result",
                         "tool_use_id": block.id,
-                        "content": pre_tool_use_result,
+                        "content": deny_reason,
                     }
                 )
                 continue
@@ -66,6 +72,9 @@ def agent_loop(messages: List[MessageParam]):
 
             tool_output_content = TOOL_HANDLERS[block.name](**block.input)
             logger.debug("Tool Output: {}", str(tool_output_content)[:200])
+
+            trigger_hooks("PostToolUse", block, tool_output_content)
+
             tool_results.append(
                 {
                     "type": "tool_result",
@@ -101,6 +110,8 @@ def main():
         # 将用户消息追加到历史，然后启动 agent loop
         # agent_loop 会原地修改 history，追加 assistant 回复和工具调用结果
         history.append({"role": "user", "content": query})
+
+        # Agent Loop
         agent_loop(history)
 
         # 从 history 末尾取出模型的最终回复并打印其中的文本部分
