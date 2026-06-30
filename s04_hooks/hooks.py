@@ -42,7 +42,7 @@ def _context_inject_hook(query: str) -> str | None:
 def _log_hook(block):
     """PreToolUse: log every tool call."""
     args_preview = str(list(block.input.values())[:2])[:60]
-    print(f"[dim]\[HOOK] {block.name}({args_preview})[/dim]")
+    print(f"[dim] [HOOK] use tool {block.name}({args_preview})[/dim]")
     return None
 
 
@@ -50,7 +50,7 @@ def _large_output_hook(block, output):
     """PostToolUse: warn on large output."""
     if len(str(output)) > 100000:
         print(
-            f"[yellow]\[HOOK] ⚠ Large output from {block.name}: {len(str(output))} chars[/yellow]"
+            f"[yellow] [HOOK] ⚠ Large output from {block.name}: {len(str(output))} chars[/yellow]"
         )
     return None
 
@@ -63,7 +63,7 @@ def _summary_hook(messages: list):
         for b in (m.get("content") if isinstance(m.get("content"), list) else [])
         if isinstance(b, dict) and b.get("type") == "tool_result"
     )
-    print(f"[dim]\[HOOK] Stop: session used {tool_count} tool calls[/dim]")
+    print(f"[dim] [HOOK] Stop: session used {tool_count} tool calls[/dim]")
     return None
 
 
