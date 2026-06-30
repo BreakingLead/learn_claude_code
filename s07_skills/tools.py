@@ -8,6 +8,7 @@ from anthropic.types import ToolParam
 from typing_extensions import Dict
 
 from .constants import WORKDIR
+from .skills import load_skill
 from .subagent import spawn_subagent
 from .todo import run_todo_write
 
@@ -84,6 +85,7 @@ TOOL_HANDLERS: Dict[str, Callable] = {
     "glob": run_glob,
     "task": spawn_subagent,
     "todo_write": run_todo_write,
+    "load_skill": load_skill,
 }
 
 TOOLS: List[ToolParam] = [
@@ -165,6 +167,15 @@ TOOLS: List[ToolParam] = [
             "type": "object",
             "properties": {"description": {"type": "string"}},
             "required": ["description"],
+        },
+    },
+    {
+        "name": "load_skill",
+        "description": "Load the full instructions for an available skill by name.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"name": {"type": "string"}},
+            "required": ["name"],
         },
     },
 ]

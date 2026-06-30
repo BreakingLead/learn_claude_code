@@ -16,6 +16,7 @@ from rich.prompt import Prompt
 from .constants import MODEL, SYSTEM
 from .hooks import trigger_hooks
 from .permission import permission_hook
+from .skills import get_system_prompt
 from .tools import TOOL_HANDLERS, TOOLS
 
 load_dotenv(override=True)
@@ -40,7 +41,7 @@ def agent_loop(messages: List[MessageParam]):
         res = client.messages.create(
             model=MODEL,
             max_tokens=8000,
-            system=SYSTEM,
+            system=get_system_prompt(),
             tools=TOOLS,
             messages=messages,
         )
@@ -104,7 +105,7 @@ def agent_loop(messages: List[MessageParam]):
 
 # ── Entry point ──────────────────────────────────────────
 def main():
-    print("[bold]s06: subagent[/bold]")
+    print("[bold]s07: subagent[/bold]")
     print("输入问题，回车发送。输入 q 退出。\n")
 
     # history 保存完整的对话历史（user/assistant 交替），供多轮对话使用
@@ -114,7 +115,7 @@ def main():
     while True:
         try:
             # 显示带颜色的提示符，等待用户输入
-            query = Prompt.ask("[cyan]s06 >>[/cyan]")
+            query = Prompt.ask("[cyan]s07 >>[/cyan]")
             trigger_hooks("UserPromptSubmit", query)
             # 空输入、"q"、"exit" 均退出
             if query.strip().lower() in ("q", "exit", ""):

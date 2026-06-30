@@ -42,7 +42,7 @@ def _context_inject_hook(query: str) -> str | None:
 def _log_hook(block):
     """PreToolUse: log every tool call."""
     args_preview = str(list(block.input.values())[:2])[:60]
-    logger.debug(f"[HOOK] Used tool {block.name}: ({args_preview})")
+    print(f"[HOOK] Used tool {block.name}: ({args_preview})")
     return None
 
 
