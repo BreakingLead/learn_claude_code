@@ -105,7 +105,7 @@ def agent_loop(messages: List[MessageParam]):
 
 # ── Entry point ──────────────────────────────────────────
 def main():
-    print("[bold]s04: Hooks[/bold]")
+    print("[bold]s05: Hooks[/bold]")
     print("输入问题，回车发送。输入 q 退出。\n")
 
     # history 保存完整的对话历史（user/assistant 交替），供多轮对话使用
@@ -115,7 +115,7 @@ def main():
     while True:
         try:
             # 显示带颜色的提示符，等待用户输入
-            query = Prompt.ask("[cyan]s04 >>[/cyan]")
+            query = Prompt.ask("[cyan]s05 >>[/cyan]")
             trigger_hooks("UserPromptSubmit", query)
             # 空输入、"q"、"exit" 均退出
             if query.strip().lower() in ("q", "exit", ""):

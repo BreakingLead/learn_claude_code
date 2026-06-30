@@ -7,6 +7,8 @@ from typing import List
 from anthropic.types import ToolParam
 from typing_extensions import Dict
 
+from s05_todos.todo import run_todo_write
+
 from .constants import WORKDIR
 
 
@@ -80,6 +82,7 @@ TOOL_HANDLERS: Dict[str, Callable] = {
     "write_file": run_write,
     "edit_file": run_edit,
     "glob": run_glob,
+    "todo_write": run_todo_write,
 }
 
 TOOLS: List[ToolParam] = [
