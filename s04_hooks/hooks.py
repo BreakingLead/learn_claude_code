@@ -4,8 +4,8 @@ from typing import Any, Literal
 from loguru import logger
 from rich import print
 
-from s04_hooks.constants import WORKDIR
-from s04_hooks.permission import permission_hook
+from .constants import WORKDIR
+from .permission import permission_hook
 
 type HookEventType = Literal["UserPromptSubmit", "PreToolUse", "PostToolUse", "Stop"]
 type HookCallback = Callable[..., str | None]

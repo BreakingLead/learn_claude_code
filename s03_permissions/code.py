@@ -4,7 +4,7 @@ import anthropic
 from anthropic.types import MessageParam, ThinkingBlock
 from dotenv import load_dotenv
 
-from s03_permissions.permission import check_permission
+from .permission import check_permission
 
 from .constants import MODEL, SYSTEM
 from .tools import TOOL_HANDLERS, TOOLS

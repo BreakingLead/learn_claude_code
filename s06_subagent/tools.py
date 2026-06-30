@@ -8,6 +8,7 @@ from anthropic.types import ToolParam
 from typing_extensions import Dict
 
 from .constants import WORKDIR
+from .subagent import spawn_subagent
 from .todo import run_todo_write
 
 
@@ -81,6 +82,7 @@ TOOL_HANDLERS: Dict[str, Callable] = {
     "write_file": run_write,
     "edit_file": run_edit,
     "glob": run_glob,
+    "task": spawn_subagent,
     "todo_write": run_todo_write,
 }
 
@@ -154,6 +156,15 @@ TOOLS: List[ToolParam] = [
                     },
                 },
             },
+        },
+    },
+    {
+        "name": "task",
+        "description": "Launch a subagent to handle a complex subtask. Returns only the final conclusion.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"description": {"type": "string"}},
+            "required": ["description"],
         },
     },
 ]

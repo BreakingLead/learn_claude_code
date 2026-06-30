@@ -24,9 +24,20 @@ load_dotenv(override=True)
 client = anthropic.Anthropic()
 
 
+rounds_since_todo = 0
+
+
 # messages 是完整的对话历史，每次调用 agent_loop 时会更新
 def agent_loop(messages: List[MessageParam]):
+    global rounds_since_todo
     while True:
+        # s05: nag reminder — inject if model hasn't updated todos for 3 rounds
+        if rounds_since_todo >= 3 and messages:
+            messages.append(
+                {"role": "user", "content": "<reminder>Update your todos.</reminder>"}
+            )
+            rounds_since_todo = 0
+
         res = client.messages.create(
             model=MODEL,
             max_tokens=8000,
@@ -48,6 +59,8 @@ def agent_loop(messages: List[MessageParam]):
                 continue
             else:
                 return
+
+        rounds_since_todo += 1
 
         tool_results: List[ToolResultBlockParam] = []
 
@@ -75,6 +88,10 @@ def agent_loop(messages: List[MessageParam]):
 
             trigger_hooks("PostToolUse", block, tool_output_content)
 
+            # s05: reset nag counter when todo_write is called
+            if block.name == "todo_write":
+                rounds_since_todo = 0
+
             tool_results.append(
                 {
                     "type": "tool_result",
@@ -88,7 +105,7 @@ def agent_loop(messages: List[MessageParam]):
 
 # ── Entry point ──────────────────────────────────────────
 def main():
-    print("[bold]s04: Hooks[/bold]")
+    print("[bold]s06: Hooks[/bold]")
     print("输入问题，回车发送。输入 q 退出。\n")
 
     # history 保存完整的对话历史（user/assistant 交替），供多轮对话使用
@@ -98,7 +115,7 @@ def main():
     while True:
         try:
             # 显示带颜色的提示符，等待用户输入
-            query = Prompt.ask("[cyan]s04 >>[/cyan]")
+            query = Prompt.ask("[cyan]s06 >>[/cyan]")
             trigger_hooks("UserPromptSubmit", query)
             # 空输入、"q"、"exit" 均退出
             if query.strip().lower() in ("q", "exit", ""):

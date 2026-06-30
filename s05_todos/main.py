@@ -13,10 +13,9 @@ from rich import print
 from rich.markdown import Markdown
 from rich.prompt import Prompt
 
-from s03_permissions.permission import check_permission
-from s04_hooks.hooks import trigger_hooks
-
 from .constants import MODEL, SYSTEM
+from .hooks import trigger_hooks
+from .permission import check_permission
 from .tools import TOOL_HANDLERS, TOOLS
 
 load_dotenv(override=True)
