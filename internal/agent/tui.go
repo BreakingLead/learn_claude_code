@@ -281,6 +281,9 @@ func (m *tuiModel) refreshLogs() {
 }
 
 func (m tuiModel) renderMessage(message anthropic.MessageParam) string {
+	if strings.HasPrefix(strings.TrimSpace(extractResponseText(message)), "<memory>") {
+		return ""
+	}
 	var parts []string
 	for _, block := range message.Content {
 		switch {

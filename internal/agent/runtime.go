@@ -26,6 +26,7 @@ type agentRuntime struct {
 	currentTodos    []Todo
 	roundsSinceTodo int
 	promptCache     promptCache
+	memoryTurns     int
 }
 
 type agentConfig struct {
@@ -34,6 +35,8 @@ type agentConfig struct {
 	CompactDir     string
 	ToolResultsDir string
 	TranscriptDir  string
+	MemoryDir      string
+	MemoryIndex    string
 }
 
 type promptCache struct {
@@ -53,6 +56,8 @@ func newAgentConfig() (agentConfig, error) {
 		CompactDir:     compactDir,
 		ToolResultsDir: filepath.Join(compactDir, "tool_results"),
 		TranscriptDir:  filepath.Join(compactDir, "transcripts"),
+		MemoryDir:      filepath.Join(workdir, ".memory"),
+		MemoryIndex:    filepath.Join(workdir, ".memory", "MEMORY.md"),
 	}, nil
 }
 

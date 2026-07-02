@@ -18,14 +18,15 @@ type SkillInfo struct {
 }
 
 type promptContext struct {
-	Workdir      string
-	Model        string
-	ToolNames    []string
-	Skills       []SkillInfo
-	MemoryBlocks []memoryBlock
+	Workdir       string
+	Model         string
+	ToolNames     []string
+	Skills        []SkillInfo
+	ProjectBlocks []contextBlock
+	MemoryBlocks  []contextBlock
 }
 
-type memoryBlock struct {
+type contextBlock struct {
 	Name    string
 	Path    string
 	Content string
@@ -139,11 +140,12 @@ func (rt *agentRuntime) promptContext(toolNames []string) promptContext {
 	sortedToolNames := append([]string(nil), toolNames...)
 	sort.Strings(sortedToolNames)
 	return promptContext{
-		Workdir:      rt.config.Workdir,
-		Model:        rt.config.Model,
-		ToolNames:    sortedToolNames,
-		Skills:       sortedSkills(rt.scanSkills()),
-		MemoryBlocks: rt.loadMemoryBlocks(),
+		Workdir:       rt.config.Workdir,
+		Model:         rt.config.Model,
+		ToolNames:     sortedToolNames,
+		Skills:        sortedSkills(rt.scanSkills()),
+		ProjectBlocks: rt.loadProjectBlocks(),
+		MemoryBlocks:  rt.loadMemoryBlocks(),
 	}
 }
 
@@ -161,6 +163,14 @@ func (ctx promptContext) contextKey() string {
 		sb.WriteString(skill.Description)
 		sb.WriteString("\n")
 	}
+	for _, block := range ctx.ProjectBlocks {
+		sb.WriteString(block.Name)
+		sb.WriteString(":")
+		sb.WriteString(block.Path)
+		sb.WriteString(":")
+		sb.WriteString(block.Content)
+		sb.WriteString("\n")
+	}
 	for _, block := range ctx.MemoryBlocks {
 		sb.WriteString(block.Name)
 		sb.WriteString(":")
@@ -173,7 +183,7 @@ func (ctx promptContext) contextKey() string {
 	return fmt.Sprintf("%x", sum)
 }
 
-func (rt *agentRuntime) loadMemoryBlocks() []memoryBlock {
+func (rt *agentRuntime) loadProjectBlocks() []contextBlock {
 	candidates := []struct {
 		name string
 		path string
@@ -182,7 +192,24 @@ func (rt *agentRuntime) loadMemoryBlocks() []memoryBlock {
 		{name: "Project README", path: filepath.Join(rt.config.Workdir, "README.md")},
 	}
 
-	var blocks []memoryBlock
+	return rt.readContextBlocks(candidates, 6000)
+}
+
+func (rt *agentRuntime) loadMemoryBlocks() []contextBlock {
+	candidates := []struct {
+		name string
+		path string
+	}{
+		{name: "Memory", path: filepath.Join(rt.config.Workdir, ".memory", "MEMORY.md")},
+	}
+	return rt.readContextBlocks(candidates, 6000)
+}
+
+func (rt *agentRuntime) readContextBlocks(candidates []struct {
+	name string
+	path string
+}, limit int) []contextBlock {
+	var blocks []contextBlock
 	for _, candidate := range candidates {
 		raw, err := os.ReadFile(candidate.path)
 		if err != nil {
@@ -192,10 +219,10 @@ func (rt *agentRuntime) loadMemoryBlocks() []memoryBlock {
 		if content == "" {
 			continue
 		}
-		if len(content) > 6000 {
-			content = content[:6000] + "\n[truncated]"
+		if limit > 0 && len(content) > limit {
+			content = content[:limit] + "\n[truncated]"
 		}
-		blocks = append(blocks, memoryBlock{
+		blocks = append(blocks, contextBlock{
 			Name:    candidate.name,
 			Path:    candidate.path,
 			Content: content,
@@ -215,6 +242,14 @@ func assembleSystemPrompt(ctx promptContext) string {
 		"Skills available:\n"+listSkills(ctx.Skills),
 	)
 
+	if len(ctx.ProjectBlocks) > 0 {
+		var project []string
+		for _, block := range ctx.ProjectBlocks {
+			project = append(project, fmt.Sprintf("## %s\nSource: %s\n%s", block.Name, block.Path, block.Content))
+		}
+		sections = append(sections, "Project context:\n"+strings.Join(project, "\n\n"))
+	}
+
 	if len(ctx.MemoryBlocks) > 0 {
 		var memories []string
 		for _, block := range ctx.MemoryBlocks {
@@ -232,10 +267,12 @@ func (rt *agentRuntime) getSystemPrompt(toolNames []string) string {
 	ctx := rt.promptContext(toolNames)
 	key := ctx.contextKey()
 	if rt.promptCache.contextKey == key {
+		rt.emitLine("[cache hit] system prompt context key: %s", key[:12])
 		return rt.promptCache.prompt
 	}
 	prompt := assembleSystemPrompt(ctx)
 	rt.promptCache = promptCache{contextKey: key, prompt: prompt}
+	rt.emitLine("[assembled] system prompt sections: base, tools, skills, project=%d, memory=%d", len(ctx.ProjectBlocks), len(ctx.MemoryBlocks))
 	return prompt
 }
 

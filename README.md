@@ -14,6 +14,7 @@ internal/agent/     agent 实现，只供本项目内部使用
   permission.go     三层权限门控：拒绝列表 → 规则检查 → 用户确认
   hooks.go          事件钩子系统：PreToolUse / PostToolUse / Stop 等
   compact.go        四层上下文压缩：snip → micro → persist → LLM 摘要
+  memory.go         持久记忆：加载相关记忆、提取新记忆、维护 MEMORY.md 索引
   todo.go           任务列表管理
   subagent.go       子 agent 生成（独立对话、30 轮上限）
   skills.go         技能扫描（.agents/skills/）与系统提示生成
@@ -44,14 +45,28 @@ main() → REPL 读取用户输入
   ↓
 agentLoop(messages)
   ├── getSystemPrompt()         # 由 promptContext 组装并按 context key 缓存
+  ├── injectRelevantMemories()   # 从 .memory/ 加载与当前请求相关的持久记忆
   ├── maybeCompactHistory()     # 自动上下文压缩
   ├── client.Messages.New()     # 调用 API
   ├── triggerHooks(PreToolUse)   # 权限检查
   ├── toolHandlers()[name]()    # 执行当前 runtime 绑定的工具
   ├── triggerHooks(PostToolUse)  # 输出检查
   ├── 收集 tool_result → 追加到消息
+  ├── extractMemories()          # 停止后提取稳定偏好/事实/决策
   └── StopReason != ToolUse → 触发 Stop 钩子 → 返回
 ```
+
+## 持久记忆
+
+`.memory/` 保存跨会话记忆：
+
+```text
+.memory/
+├── MEMORY.md        # 记忆索引
+└── *.md             # 单条记忆，包含 YAML frontmatter
+```
+
+每轮开始时会按关键词从单条记忆中选取相关内容注入上下文；每轮结束后会请求模型提取稳定偏好、项目事实、决策和约束，写入新的记忆文件并重建索引。
 
 ## 工具列表
 

@@ -16,6 +16,9 @@ func (rt *agentRuntime) agentLoop(ctx context.Context, client anthropic.Client, 
 	tools := buildTools()
 	systemPrompt := rt.getSystemPrompt(toolNames(tools))
 	handlers := rt.toolHandlers()
+	if query := latestUserText(*messages); query != "" {
+		rt.injectRelevantMemories(messages, query)
+	}
 
 	for {
 		*messages = rt.maybeCompactHistory(*messages)
@@ -70,6 +73,7 @@ func (rt *agentRuntime) agentLoop(ctx context.Context, client anthropic.Client, 
 				))
 				continue
 			}
+			rt.extractMemories(ctx, client, *messages)
 			return
 		}
 
