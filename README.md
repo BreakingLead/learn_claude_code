@@ -1,0 +1,76 @@
+# Go Agent — 设计文档
+
+基于 Anthropic 官方 Go SDK (`github.com/anthropics/anthropic-sdk-go`) 实现的编码代理（coding agent），从 Python 版 `s08_context_compact` 迁移而来。
+
+## 架构概览
+
+```
+main.go          REPL 入口 + agentLoop 核心循环
+constants.go     常量（MODEL, WORKDIR）、路径安全校验、终端颜色辅助
+tools.go         8 个工具的定义（JSON Schema）与处理函数
+permission.go    三层权限门控：拒绝列表 → 规则检查 → 用户确认
+hooks.go         事件钩子系统：PreToolUse / PostToolUse / Stop 等
+compact.go       四层上下文压缩：snip → micro → persist → LLM 摘要
+todo.go          任务列表管理
+subagent.go      子 agent 生成（独立对话、30 轮上限）
+skills.go        技能扫描（.agents/skills/）与系统提示生成
+```
+
+## 运行方式
+
+```bash
+# 确保 .env 中有 ANTHROPIC_API_KEY（和可选的 ANTHROPIC_BASE_URL）
+cd go_agent
+go run .
+```
+
+## 核心流程
+
+```
+main() → REPL 读取用户输入
+  ↓
+agentLoop(messages)
+  ├── maybeCompactHistory()     # 自动上下文压缩
+  ├── client.Messages.New()     # 调用 API
+  ├── triggerHooks(PreToolUse)   # 权限检查
+  ├── TOOL_HANDLERS[name]()     # 执行工具
+  ├── triggerHooks(PostToolUse)  # 输出检查
+  ├── 收集 tool_result → 追加到消息
+  └── StopReason != ToolUse → 触发 Stop 钩子 → 返回
+```
+
+## 工具列表
+
+| 工具 | 说明 |
+|------|------|
+| bash | 执行 shell 命令（120s 超时） |
+| read_file | 读取文件内容 |
+| write_file | 写入文件 |
+| edit_file | 精确替换文件中的文本 |
+| glob | 按模式搜索文件 |
+| todo_write | 管理任务列表 |
+| task | 启动子 agent 处理子任务 |
+| load_skill | 加载技能详细说明 |
+
+## 权限系统（三层门控）
+
+1. **拒绝列表** — `rm -rf /`, `sudo`, `shutdown` 等硬性禁止
+2. **规则检查** — 写入工作区外、`rm` 命令、`chmod 777` 等模式匹配
+3. **用户确认** — 规则命中后交互式确认（y/N）
+
+## 上下文压缩（四层递进）
+
+| 层级 | 策略 | 说明 |
+|------|------|------|
+| L1 | snipCompact | 保留头 3 + 尾 N 条，中间裁掉 |
+| L2 | microCompact | 旧 tool_result 替换为占位符 |
+| L3 | toolResultBudget | 超 30KB 的结果落盘 |
+| L4 | compactHistory | 调用 LLM 生成摘要 |
+| 紧急 | reactiveCompact | API 400 时保存 + 摘要 + 保留尾部 |
+
+## 与 Python 版的差异
+
+- **依赖**：仅需 Go SDK + godotenv，无需 rich/loguru（用 ANSI 转义码替代）
+- **类型安全**：工具输入通过 `json.RawMessage` → struct 解析，编译期类型检查
+- **并发**：Go 天然支持，未来可并行执行多个工具调用
+- **错误处理**：Go 的显式错误处理替代 Python 的 try/except

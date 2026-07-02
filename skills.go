@@ -1,0 +1,134 @@
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+)
+
+// SkillInfo 保存扫描到的技能信息
+type SkillInfo struct {
+	Name        string
+	Description string
+	Content     string // SKILL.md 原始内容
+}
+
+// scanSkills 扫描 .agents/skills/ 目录，发现所有可用技能
+func scanSkills() map[string]SkillInfo {
+	found := make(map[string]SkillInfo)
+	skillsDir := filepath.Join(WORKDIR, ".agents", "skills")
+
+	entries, err := os.ReadDir(skillsDir)
+	if err != nil {
+		return found // 目录不存在时返回空
+	}
+
+	// 排序以保证稳定输出
+	sort.Slice(entries, func(i, j int) bool {
+		return entries[i].Name() < entries[j].Name()
+	})
+
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		manifest := filepath.Join(skillsDir, entry.Name(), "SKILL.md")
+		raw, err := os.ReadFile(manifest)
+		if err != nil {
+			continue
+		}
+
+		content := string(raw)
+		meta, _ := parseFrontmatter(content)
+
+		name := meta["name"]
+		if name == "" {
+			name = entry.Name()
+		}
+		desc := meta["description"]
+		if desc == "" {
+			// 取正文第一行作为描述
+			lines := strings.SplitN(content, "\n", 2)
+			desc = strings.TrimLeft(lines[0], "# ")
+		}
+
+		found[name] = SkillInfo{Name: name, Description: desc, Content: content}
+	}
+	return found
+}
+
+// parseFrontmatter 解析 SKILL.md 中的 YAML frontmatter（简化实现）
+func parseFrontmatter(raw string) (map[string]string, string) {
+	lines := strings.Split(raw, "\n")
+	if len(lines) == 0 || strings.TrimSpace(lines[0]) != "---" {
+		return nil, raw
+	}
+
+	endIdx := -1
+	for i := 1; i < len(lines); i++ {
+		if strings.TrimSpace(lines[i]) == "---" {
+			endIdx = i
+			break
+		}
+	}
+	if endIdx < 0 {
+		return nil, raw
+	}
+
+	meta := make(map[string]string)
+	for i := 1; i < endIdx; i++ {
+		line := lines[i]
+		if !strings.Contains(line, ":") {
+			continue
+		}
+		parts := strings.SplitN(line, ":", 2)
+		key := strings.TrimSpace(parts[0])
+		value := strings.Trim(strings.TrimSpace(parts[1]), "\"'")
+		meta[key] = value
+	}
+
+	body := strings.Join(lines[endIdx+1:], "\n")
+	return meta, body
+}
+
+// listSkills 格式化技能列表用于系统提示
+func listSkills() string {
+	skills := scanSkills()
+	if len(skills) == 0 {
+		return "(no skills available)"
+	}
+	var lines []string
+	for _, skill := range skills {
+		lines = append(lines, fmt.Sprintf("- **%s**: %s", skill.Name, skill.Description))
+	}
+	return strings.Join(lines, "\n")
+}
+
+// getSystemPrompt 生成动态系统提示，包含当前可用技能
+func getSystemPrompt() string {
+	catalog := listSkills()
+	return fmt.Sprintf(
+		"You are a coding agent at %s. Skills available:\n%s\nUse load_skill to get full details when needed.",
+		WORKDIR, catalog,
+	)
+}
+
+// loadSkill 加载指定技能的完整内容
+func loadSkill(raw json.RawMessage) string {
+	var input struct {
+		Name string `json:"name"`
+	}
+	if err := json.Unmarshal(raw, &input); err != nil {
+		return fmt.Sprintf("Error: %v", err)
+	}
+
+	skills := scanSkills()
+	skill, ok := skills[input.Name]
+	if !ok {
+		return fmt.Sprintf("Skill not found: %s", input.Name)
+	}
+	return skill.Content
+}

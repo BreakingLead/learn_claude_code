@@ -7,7 +7,9 @@
       "WebFetch(domain:learn.shareai.run)",
       "Bash(git add *)",
       "Bash(git commit -m ' *)",
-      "Bash(uv run *)"
+      "Bash(uv run *)",
+      "WebSearch",
+      "WebFetch(domain:raw.githubusercontent.com)"
     ]
   }
 }
