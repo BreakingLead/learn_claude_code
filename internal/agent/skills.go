@@ -190,6 +190,7 @@ func (rt *agentRuntime) loadProjectBlocks() []contextBlock {
 	}{
 		{name: "Repository Guidelines", path: filepath.Join(rt.config.Workdir, "AGENTS.md")},
 		{name: "Project README", path: filepath.Join(rt.config.Workdir, "README.md")},
+		{name: "Task Index", path: rt.config.TaskIndex},
 	}
 
 	return rt.readContextBlocks(candidates, 6000)

@@ -15,6 +15,9 @@ internal/agent/     agent 实现，只供本项目内部使用
   hooks.go          事件钩子系统：PreToolUse / PostToolUse / Stop 等
   compact.go        四层上下文压缩：snip → micro → persist → LLM 摘要
   memory.go         持久记忆：加载相关记忆、提取新记忆、维护 MEMORY.md 索引
+  recovery.go       错误恢复：context overflow、max_tokens、rate limit、overload
+  task_system.go    持久任务：维护 .tasks/ 和 TASKS.md 索引
+  background.go     后台命令：启动后台 bash 并注入完成通知
   todo.go           任务列表管理
   subagent.go       子 agent 生成（独立对话、30 轮上限）
   skills.go         技能扫描（.agents/skills/）与系统提示生成
@@ -46,8 +49,9 @@ main() → REPL 读取用户输入
 agentLoop(messages)
   ├── getSystemPrompt()         # 由 promptContext 组装并按 context key 缓存
   ├── injectRelevantMemories()   # 从 .memory/ 加载与当前请求相关的持久记忆
+  ├── injectBackgroundNotifications()
   ├── maybeCompactHistory()     # 自动上下文压缩
-  ├── client.Messages.New()     # 调用 API
+  ├── callModelWithRecovery()   # 调用 API 并处理可恢复错误
   ├── triggerHooks(PreToolUse)   # 权限检查
   ├── toolHandlers()[name]()    # 执行当前 runtime 绑定的工具
   ├── triggerHooks(PostToolUse)  # 输出检查
@@ -67,6 +71,28 @@ agentLoop(messages)
 ```
 
 每轮开始时会按关键词从单条记忆中选取相关内容注入上下文；每轮结束后会请求模型提取稳定偏好、项目事实、决策和约束，写入新的记忆文件并重建索引。
+
+## 持久任务与后台命令
+
+`.tasks/` 保存跨会话任务图：
+
+```text
+.tasks/
+├── TASKS.md
+└── *.md
+```
+
+相关工具：`task_create`、`task_update`、`task_list`。
+
+后台命令通过 `background_bash` 启动，`background_status` 查看单个 job，`background_list` 列出所有 job。后台 job 完成后会在下一次模型调用前注入 `<background>` 内部消息，并在右侧日志显示完成状态。
+
+## 错误恢复
+
+模型调用统一走 `callModelWithRecovery()`：
+
+- context overflow：保存 transcript 后 reactive compact 并重试
+- rate limit / overload：指数退避重试
+- max_tokens：提升输出 token 上限并自动续写一次
 
 ## 工具列表
 

@@ -17,14 +17,20 @@ type ToolHandler func(input json.RawMessage) string
 // toolHandlers 返回当前运行时绑定的工具处理函数。
 func (rt *agentRuntime) toolHandlers() map[string]ToolHandler {
 	return map[string]ToolHandler{
-		"bash":       rt.runBash,
-		"read_file":  rt.runRead,
-		"write_file": rt.runWrite,
-		"edit_file":  rt.runEdit,
-		"glob":       rt.runGlob,
-		"todo_write": rt.runTodoWrite,
-		"task":       rt.spawnSubagent,
-		"load_skill": rt.loadSkill,
+		"bash":              rt.runBash,
+		"read_file":         rt.runRead,
+		"write_file":        rt.runWrite,
+		"edit_file":         rt.runEdit,
+		"glob":              rt.runGlob,
+		"todo_write":        rt.runTodoWrite,
+		"task":              rt.spawnSubagent,
+		"load_skill":        rt.loadSkill,
+		"task_create":       rt.runTaskCreate,
+		"task_update":       rt.runTaskUpdate,
+		"task_list":         rt.runTaskList,
+		"background_bash":   rt.runBackgroundBash,
+		"background_status": rt.runBackgroundStatus,
+		"background_list":   rt.runBackgroundList,
 	}
 }
 
@@ -267,6 +273,67 @@ func buildTools() []anthropic.ToolUnionParam {
 					"name": map[string]any{"type": "string"},
 				},
 				Required: []string{"name"},
+			},
+		},
+		{
+			Name:        "task_create",
+			Description: anthropic.String("Create a persistent task in .tasks/."),
+			InputSchema: anthropic.ToolInputSchemaParam{
+				Properties: map[string]any{
+					"title":     map[string]any{"type": "string"},
+					"summary":   map[string]any{"type": "string"},
+					"content":   map[string]any{"type": "string"},
+					"parent_id": map[string]any{"type": "string"},
+				},
+				Required: []string{"title"},
+			},
+		},
+		{
+			Name:        "task_update",
+			Description: anthropic.String("Update a persistent task by id."),
+			InputSchema: anthropic.ToolInputSchemaParam{
+				Properties: map[string]any{
+					"id":      map[string]any{"type": "string"},
+					"title":   map[string]any{"type": "string"},
+					"status":  map[string]any{"type": "string"},
+					"summary": map[string]any{"type": "string"},
+					"content": map[string]any{"type": "string"},
+				},
+				Required: []string{"id"},
+			},
+		},
+		{
+			Name:        "task_list",
+			Description: anthropic.String("List persistent tasks from .tasks/TASKS.md."),
+			InputSchema: anthropic.ToolInputSchemaParam{
+				Properties: map[string]any{},
+			},
+		},
+		{
+			Name:        "background_bash",
+			Description: anthropic.String("Run a shell command in the background and return a job id."),
+			InputSchema: anthropic.ToolInputSchemaParam{
+				Properties: map[string]any{
+					"command": map[string]any{"type": "string"},
+				},
+				Required: []string{"command"},
+			},
+		},
+		{
+			Name:        "background_status",
+			Description: anthropic.String("Inspect a background job by id."),
+			InputSchema: anthropic.ToolInputSchemaParam{
+				Properties: map[string]any{
+					"id": map[string]any{"type": "string"},
+				},
+				Required: []string{"id"},
+			},
+		},
+		{
+			Name:        "background_list",
+			Description: anthropic.String("List background shell jobs."),
+			InputSchema: anthropic.ToolInputSchemaParam{
+				Properties: map[string]any{},
 			},
 		},
 	}

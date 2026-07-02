@@ -29,15 +29,6 @@ func (rt *agentRuntime) spawnSubagent(raw json.RawMessage) string {
 	client := anthropic.NewClient(opts...)
 	ctx := context.Background()
 
-	// 子 agent 可用的工具：排除 task，防止无限递归
-	allTools := buildTools()
-	var subTools []anthropic.ToolUnionParam
-	for _, t := range allTools {
-		if t.OfTool != nil && t.OfTool.Name != "task" {
-			subTools = append(subTools, t)
-		}
-	}
-
 	// 子 agent 可用的工具处理函数
 	subHandlers := map[string]ToolHandler{
 		"bash":       rt.runBash,
@@ -45,6 +36,16 @@ func (rt *agentRuntime) spawnSubagent(raw json.RawMessage) string {
 		"write_file": rt.runWrite,
 		"edit_file":  rt.runEdit,
 		"glob":       rt.runGlob,
+	}
+	// 子 agent 只暴露自己能处理的工具，避免递归 task 或后台任务进入子循环。
+	allTools := buildTools()
+	var subTools []anthropic.ToolUnionParam
+	for _, t := range allTools {
+		if t.OfTool != nil {
+			if _, ok := subHandlers[t.OfTool.Name]; ok {
+				subTools = append(subTools, t)
+			}
+		}
 	}
 
 	prefix := colorDim("  │ ")

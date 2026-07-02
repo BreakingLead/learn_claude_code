@@ -52,7 +52,7 @@ func (rt *agentRuntime) permissionRules() []permissionRule {
 			message: "Writing outside workspace",
 		},
 		{
-			tools: []string{"bash"},
+			tools: []string{"bash", "background_bash"},
 			check: func(raw json.RawMessage) bool {
 				var input struct {
 					Command string `json:"command"`
@@ -115,7 +115,7 @@ func (rt *agentRuntime) permissionHook(args ...any) *string {
 	rawInput, _ := json.Marshal(block.Input)
 
 	// Gate 1: 拒绝列表
-	if block.Name == "bash" {
+	if block.Name == "bash" || block.Name == "background_bash" {
 		var input struct {
 			Command string `json:"command"`
 		}

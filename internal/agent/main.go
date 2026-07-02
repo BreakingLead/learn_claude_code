@@ -3,7 +3,6 @@ package agent
 import (
 	"context"
 	"encoding/json"
-	"net/http"
 	"os"
 
 	"github.com/anthropics/anthropic-sdk-go"
@@ -22,6 +21,7 @@ func (rt *agentRuntime) agentLoop(ctx context.Context, client anthropic.Client, 
 
 	for {
 		*messages = rt.maybeCompactHistory(*messages)
+		rt.injectBackgroundNotifications(messages)
 
 		// nag reminder：如果 3 轮没更新 todo，注入提醒
 		if rt.roundsSinceTodo >= 3 && len(*messages) > 0 {
@@ -32,38 +32,24 @@ func (rt *agentRuntime) agentLoop(ctx context.Context, client anthropic.Client, 
 		}
 
 		systemPrompt := rt.getSystemPrompt(names)
-		resp, err := client.Messages.New(ctx, anthropic.MessageNewParams{
-			Model:     anthropic.Model(rt.config.Model),
-			MaxTokens: 8000,
-			System:    []anthropic.TextBlockParam{{Text: systemPrompt}},
-			Tools:     tools,
-			Messages:  *messages,
-		})
+		params := anthropic.MessageNewParams{
+			System:   []anthropic.TextBlockParam{{Text: systemPrompt}},
+			Tools:    tools,
+			Messages: *messages,
+		}
+		resp, err := rt.callModelWithRecovery(ctx, client, params, messages)
 
 		if err != nil {
-			// 检查是否为 400 错误（上下文超限），尝试紧急压缩后重试
-			if apiErr, ok := err.(*anthropic.Error); ok && apiErr.StatusCode == http.StatusBadRequest {
-				rt.emitLine("%s", colorYellow("[context overflow, applying reactive compact...]"))
-				*messages = rt.reactiveCompact(*messages)
-				resp, err = client.Messages.New(ctx, anthropic.MessageNewParams{
-					Model:     anthropic.Model(rt.config.Model),
-					MaxTokens: 8000,
-					System:    []anthropic.TextBlockParam{{Text: systemPrompt}},
-					Tools:     tools,
-					Messages:  *messages,
-				})
-				if err != nil {
-					rt.emitLine("%s", colorRed("Error: "+err.Error()))
-					return
-				}
-			} else {
-				rt.emitLine("%s", colorRed("Error: "+err.Error()))
-				return
-			}
+			rt.emitLine("%s", colorRed("Error: "+err.Error()))
+			return
 		}
 
 		// 将 assistant 回复追加到历史
 		*messages = append(*messages, resp.ToParam())
+
+		if resp.StopReason == anthropic.StopReasonMaxTokens && rt.continueAfterMaxTokens(messages) {
+			continue
+		}
 
 		// 非 tool_use 停止原因 → 触发 Stop 钩子，结束循环
 		if resp.StopReason != anthropic.StopReasonToolUse {

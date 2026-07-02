@@ -11,3 +11,4 @@ wheels/
 
 # Runtime agent state
 .memory/
+.tasks/

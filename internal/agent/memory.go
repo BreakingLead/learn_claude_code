@@ -72,7 +72,7 @@ func latestUserText(messages []anthropic.MessageParam) string {
 			continue
 		}
 		text := strings.TrimSpace(extractResponseText(messages[i]))
-		if text == "" || strings.HasPrefix(text, "<memory>") {
+		if text == "" || isInjectedContext(text) {
 			continue
 		}
 		return text
@@ -272,12 +272,18 @@ func recentTranscript(messages []anthropic.MessageParam, limit int) string {
 	var lines []string
 	for _, message := range messages {
 		text := extractResponseText(message)
-		if strings.TrimSpace(text) == "" || strings.HasPrefix(strings.TrimSpace(text), "<memory>") {
+		if strings.TrimSpace(text) == "" || isInjectedContext(text) {
 			continue
 		}
 		lines = append(lines, fmt.Sprintf("%s: %s", message.Role, text))
 	}
 	return strings.Join(lines, "\n\n")
+}
+
+// isInjectedContext 判断文本是否为 agent 内部注入的上下文消息。
+func isInjectedContext(text string) bool {
+	trimmed := strings.TrimSpace(text)
+	return strings.HasPrefix(trimmed, "<memory>") || strings.HasPrefix(trimmed, "<background>")
 }
 
 // extractResponseText 提取 MessageParam 中所有 text block 的文本内容。

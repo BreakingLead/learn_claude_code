@@ -73,6 +73,8 @@ func testConfig(workdir string) agentConfig {
 		TranscriptDir:  filepath.Join(workdir, ".agent_state", "compact", "transcripts"),
 		MemoryDir:      filepath.Join(workdir, ".memory"),
 		MemoryIndex:    filepath.Join(workdir, ".memory", "MEMORY.md"),
+		TaskDir:        filepath.Join(workdir, ".tasks"),
+		TaskIndex:      filepath.Join(workdir, ".tasks", "TASKS.md"),
 	}
 }
 

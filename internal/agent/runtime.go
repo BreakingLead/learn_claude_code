@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 )
 
 type uiEventKind int
@@ -23,20 +24,31 @@ type agentRuntime struct {
 	hooks           map[HookEvent][]HookCallback
 	events          chan<- uiEvent
 	approvals       <-chan bool
+	background      *backgroundRegistry
 	currentTodos    []Todo
 	roundsSinceTodo int
 	promptCache     promptCache
 	memoryTurns     int
+	recovery        recoveryState
 }
 
 type agentConfig struct {
-	Model          string
-	Workdir        string
-	CompactDir     string
-	ToolResultsDir string
-	TranscriptDir  string
-	MemoryDir      string
-	MemoryIndex    string
+	Model                 string
+	FallbackModel         string
+	Workdir               string
+	CompactDir            string
+	ToolResultsDir        string
+	TranscriptDir         string
+	MemoryDir             string
+	MemoryIndex           string
+	TaskDir               string
+	TaskIndex             string
+	DefaultTokens         int64
+	EscalatedTokens       int64
+	MaxRecoveryRetries    int
+	MaxTokenContinuations int
+	RetryBaseDelay        time.Duration
+	RetryMaxDelay         time.Duration
 }
 
 type promptCache struct {
@@ -51,13 +63,22 @@ func newAgentConfig() (agentConfig, error) {
 	}
 	compactDir := filepath.Join(workdir, ".agent_state", "compact")
 	return agentConfig{
-		Model:          getEnvOr("MODEL", "deepseek-v4-flash"),
-		Workdir:        workdir,
-		CompactDir:     compactDir,
-		ToolResultsDir: filepath.Join(compactDir, "tool_results"),
-		TranscriptDir:  filepath.Join(compactDir, "transcripts"),
-		MemoryDir:      filepath.Join(workdir, ".memory"),
-		MemoryIndex:    filepath.Join(workdir, ".memory", "MEMORY.md"),
+		Model:                 getEnvOr("MODEL", "deepseek-v4-flash"),
+		FallbackModel:         getEnvOr("FALLBACK_MODEL", "deepseek-v4-flash"),
+		Workdir:               workdir,
+		CompactDir:            compactDir,
+		ToolResultsDir:        filepath.Join(compactDir, "tool_results"),
+		TranscriptDir:         filepath.Join(compactDir, "transcripts"),
+		MemoryDir:             filepath.Join(workdir, ".memory"),
+		MemoryIndex:           filepath.Join(workdir, ".memory", "MEMORY.md"),
+		TaskDir:               filepath.Join(workdir, ".tasks"),
+		TaskIndex:             filepath.Join(workdir, ".tasks", "TASKS.md"),
+		DefaultTokens:         8000,
+		EscalatedTokens:       16000,
+		MaxRecoveryRetries:    3,
+		MaxTokenContinuations: 1,
+		RetryBaseDelay:        500 * time.Millisecond,
+		RetryMaxDelay:         8 * time.Second,
 	}, nil
 }
 
@@ -73,6 +94,8 @@ func newAgentRuntime(config agentConfig, events chan<- uiEvent, approvals <-chan
 		events:    events,
 		approvals: approvals,
 	}
+	rt.background = newBackgroundRegistry(rt.emitLine)
+	rt.recovery = newRecoveryState(config)
 	rt.initHooks()
 	return rt
 }
