@@ -1,8 +1,8 @@
 from typing import List
 
 import anthropic
+from anthropic import APIStatusError
 from anthropic.types import (
-    ContentBlock,
     MessageParam,
     ThinkingBlock,
     ToolResultBlockParam,
@@ -13,9 +13,9 @@ from rich import print
 from rich.markdown import Markdown
 from rich.prompt import Prompt
 
-from .constants import MODEL, SYSTEM
+from .compact import maybe_compact_history, reactive_compact
+from .constants import MODEL
 from .hooks import trigger_hooks
-from .permission import permission_hook
 from .skills import get_system_prompt
 from .tools import TOOL_HANDLERS, TOOLS
 
@@ -31,6 +31,8 @@ rounds_since_todo = 0
 def agent_loop(messages: List[MessageParam]):
     global rounds_since_todo
     while True:
+        messages[:] = maybe_compact_history(messages)
+
         # s05: nag reminder — inject if model hasn't updated todos for 3 rounds
         if rounds_since_todo >= 3 and messages:
             messages.append(
@@ -38,13 +40,25 @@ def agent_loop(messages: List[MessageParam]):
             )
             rounds_since_todo = 0
 
-        res = client.messages.create(
-            model=MODEL,
-            max_tokens=8000,
-            system=get_system_prompt(),
-            tools=TOOLS,
-            messages=messages,
-        )
+        try:
+            res = client.messages.create(
+                model=MODEL,
+                max_tokens=8000,
+                system=get_system_prompt(),
+                tools=TOOLS,
+                messages=messages,
+            )
+        except APIStatusError as exc:
+            if exc.status_code != 400:
+                raise
+            messages[:] = reactive_compact(messages)
+            res = client.messages.create(
+                model=MODEL,
+                max_tokens=8000,
+                system=get_system_prompt(),
+                tools=TOOLS,
+                messages=messages,
+            )
         messages.append(
             {
                 "role": "assistant",
@@ -84,7 +98,7 @@ def agent_loop(messages: List[MessageParam]):
                 continue
 
             tool_output_content = TOOL_HANDLERS[block.name](**block.input)
-            logger.debug("Tool Output: {}", str(tool_output_content)[:200])
+            print("[dim]Tool Output: {}[/dim]", str(tool_output_content)[:200])
 
             trigger_hooks("PostToolUse", block, tool_output_content)
 
@@ -101,11 +115,12 @@ def agent_loop(messages: List[MessageParam]):
             )
 
         messages.append({"role": "user", "content": tool_results})
+        messages[:] = maybe_compact_history(messages)
 
 
 # ── Entry point ──────────────────────────────────────────
 def main():
-    print("[bold]s07: subagent[/bold]")
+    print("[bold]s08: context compact[/bold]")
     print("输入问题，回车发送。输入 q 退出。\n")
 
     # history 保存完整的对话历史（user/assistant 交替），供多轮对话使用
@@ -115,7 +130,7 @@ def main():
     while True:
         try:
             # 显示带颜色的提示符，等待用户输入
-            query = Prompt.ask("[cyan]s07 >>[/cyan]")
+            query = Prompt.ask("[cyan]s08 >>[/cyan]")
             trigger_hooks("UserPromptSubmit", query)
             # 空输入、"q"、"exit" 均退出
             if query.strip().lower() in ("q", "exit", ""):

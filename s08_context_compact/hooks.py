@@ -33,12 +33,6 @@ def trigger_hooks(event: HookEventType, *args: Any) -> str | None:
 # --------------------- DEFAULT HOOKS ----------------------
 
 
-def _context_inject_hook(query: str) -> str | None:
-    """Inject current working directory info into every prompt."""
-    logger.debug("[HOOK] UserPromptSubmit: working in {}", WORKDIR)
-    return None  # return None = no modification, let prompt through
-
-
 def _log_hook(block):
     """PreToolUse: log every tool call."""
     args_preview = str(list(block.input.values())[:2])[:60]
@@ -67,7 +61,7 @@ def _summary_hook(messages: list):
     return None
 
 
-register_hook("UserPromptSubmit", _context_inject_hook)
+# register_hook("UserPromptSubmit", _context_inject_hook)
 register_hook("PreToolUse", permission_hook)
 register_hook("PreToolUse", _log_hook)
 register_hook("PostToolUse", _large_output_hook)

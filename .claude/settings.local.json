@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python3 -c \"import sys,json; d=json.loads\\(sys.stdin.read\\(\\)\\); print\\(json.dumps\\({k:v for k,v in d.items\\(\\) if k!='content'}, indent=2\\)\\); print\\('content length:', len\\(d.get\\('content',''\\)\\)\\)\")",
+      "Bash(python3 -c \"import sys,json; print\\(json.dumps\\(json.loads\\(sys.stdin.read\\(\\)\\), indent=2\\)\\)\")",
+      "Bash(echo \"exit: $?\")",
+      "WebFetch(domain:learn.shareai.run)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(uv run *)"
+    ]
+  }
+}

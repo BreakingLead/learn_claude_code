@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "skills": {
+    "feynman-perspective": {
+      "source": "alchaincyf/feynman-skill",
+      "sourceType": "github",
+      "skillPath": "SKILL.md",
+      "computedHash": "1af77d3363504656ffc392a003b081784f944052f42e34ac806a7078af1812e6"
+    },
+    "zhangxuefeng-perspective": {
+      "source": "alchaincyf/zhangxuefeng-skill",
+      "sourceType": "github",
+      "skillPath": "SKILL.md",
+      "computedHash": "cd8428c07956931c1a3125b3ec4512c255be87c9ec68f1bb4242839296af320a"
+    }
+  }
+}
