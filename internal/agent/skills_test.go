@@ -45,6 +45,25 @@ func TestGetSystemPromptIncludesMemoryAndCachesByContext(t *testing.T) {
 	}
 }
 
+func TestGetSystemPromptEmitsAssembledThenCacheHit(t *testing.T) {
+	workdir := t.TempDir()
+	writeFile(t, filepath.Join(workdir, ".memory", "MEMORY.md"), "# Memory Index\n\n- Cache this.")
+	events := make(chan uiEvent, 4)
+	rt := newAgentRuntime(testConfig(workdir), events, nil)
+
+	rt.getSystemPrompt([]string{"bash"})
+	first := <-events
+	if !strings.Contains(first.Text, "[assembled]") {
+		t.Fatalf("expected assembled log, got %q", first.Text)
+	}
+
+	rt.getSystemPrompt([]string{"bash"})
+	second := <-events
+	if !strings.Contains(second.Text, "[cache hit]") {
+		t.Fatalf("expected cache hit log, got %q", second.Text)
+	}
+}
+
 func testConfig(workdir string) agentConfig {
 	return agentConfig{
 		Model:          "test-model",

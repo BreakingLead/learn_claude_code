@@ -14,7 +14,7 @@ import (
 // agentLoop 核心 agent 循环：调用 API → 处理 tool_use → 发送 tool_result → 循环
 func (rt *agentRuntime) agentLoop(ctx context.Context, client anthropic.Client, messages *[]anthropic.MessageParam) {
 	tools := buildTools()
-	systemPrompt := rt.getSystemPrompt(toolNames(tools))
+	names := toolNames(tools)
 	handlers := rt.toolHandlers()
 	if query := latestUserText(*messages); query != "" {
 		rt.injectRelevantMemories(messages, query)
@@ -31,6 +31,7 @@ func (rt *agentRuntime) agentLoop(ctx context.Context, client anthropic.Client, 
 			rt.roundsSinceTodo = 0
 		}
 
+		systemPrompt := rt.getSystemPrompt(names)
 		resp, err := client.Messages.New(ctx, anthropic.MessageNewParams{
 			Model:     anthropic.Model(rt.config.Model),
 			MaxTokens: 8000,
