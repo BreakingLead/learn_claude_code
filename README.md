@@ -5,24 +5,37 @@
 ## 架构概览
 
 ```
-main.go          REPL 入口 + agentLoop 核心循环
-constants.go     常量（MODEL, WORKDIR）、路径安全校验、终端颜色辅助
-tools.go         8 个工具的定义（JSON Schema）与处理函数
-permission.go    三层权限门控：拒绝列表 → 规则检查 → 用户确认
-hooks.go         事件钩子系统：PreToolUse / PostToolUse / Stop 等
-compact.go       四层上下文压缩：snip → micro → persist → LLM 摘要
-todo.go          任务列表管理
-subagent.go      子 agent 生成（独立对话、30 轮上限）
-skills.go        技能扫描（.agents/skills/）与系统提示生成
+cmd/go-agent/       CLI 入口
+internal/agent/     agent 实现，只供本项目内部使用
+  main.go           REPL 入口 + agentLoop 核心循环
+  runtime.go        显式运行时状态、配置、hooks、UI 事件、prompt 缓存
+  constants.go      环境变量读取、终端颜色辅助
+  tools.go          8 个工具的定义（JSON Schema）与处理函数
+  permission.go     三层权限门控：拒绝列表 → 规则检查 → 用户确认
+  hooks.go          事件钩子系统：PreToolUse / PostToolUse / Stop 等
+  compact.go        四层上下文压缩：snip → micro → persist → LLM 摘要
+  todo.go           任务列表管理
+  subagent.go       子 agent 生成（独立对话、30 轮上限）
+  skills.go         技能扫描（.agents/skills/）与系统提示生成
 ```
 
 ## 运行方式
 
 ```bash
 # 确保 .env 中有 ANTHROPIC_API_KEY（和可选的 ANTHROPIC_BASE_URL）
-cd go_agent
-go run .
+go run ./cmd/go-agent
 ```
+
+## TUI 快捷键
+
+项目现在使用 Bubble Tea 提供交互式终端界面：
+
+| 快捷键 | 说明 |
+|--------|------|
+| Enter | 在输入框中换行 |
+| Ctrl+S | 发送当前输入 |
+| Ctrl+C | 退出 |
+| y / n | 权限确认时允许 / 拒绝工具调用 |
 
 ## 核心流程
 
@@ -30,10 +43,11 @@ go run .
 main() → REPL 读取用户输入
   ↓
 agentLoop(messages)
+  ├── getSystemPrompt()         # 由 promptContext 组装并按 context key 缓存
   ├── maybeCompactHistory()     # 自动上下文压缩
   ├── client.Messages.New()     # 调用 API
   ├── triggerHooks(PreToolUse)   # 权限检查
-  ├── TOOL_HANDLERS[name]()     # 执行工具
+  ├── toolHandlers()[name]()    # 执行当前 runtime 绑定的工具
   ├── triggerHooks(PostToolUse)  # 输出检查
   ├── 收集 tool_result → 追加到消息
   └── StopReason != ToolUse → 触发 Stop 钩子 → 返回

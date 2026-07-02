@@ -1,4 +1,4 @@
-package main
+package agent
 
 import (
 	"encoding/json"
@@ -12,11 +12,8 @@ type Todo struct {
 	Status  string `json:"status"` // "pending" | "in_progress" | "completed"
 }
 
-// currentTodos 全局任务列表
-var currentTodos []Todo
-
 // runTodoWrite 更新并展示任务列表
-func runTodoWrite(raw json.RawMessage) string {
+func (rt *agentRuntime) runTodoWrite(raw json.RawMessage) string {
 	// 解析 input: { "todos": [...] }
 	var input struct {
 		Todos []Todo `json:"todos"`
@@ -25,12 +22,12 @@ func runTodoWrite(raw json.RawMessage) string {
 		return fmt.Sprintf("Error: %v", err)
 	}
 
-	currentTodos = input.Todos
+	rt.currentTodos = input.Todos
 
 	// 生成展示文本
 	var lines []string
 	lines = append(lines, "\n## Current Tasks")
-	for _, t := range currentTodos {
+	for _, t := range rt.currentTodos {
 		icon := map[string]string{
 			"pending":     " ",
 			"in_progress": "▸",
@@ -41,7 +38,7 @@ func runTodoWrite(raw json.RawMessage) string {
 		}
 		lines = append(lines, fmt.Sprintf("- [%s] %s", icon, t.Content))
 	}
-	fmt.Println(strings.Join(lines, "\n"))
+	rt.emitLine("%s", strings.Join(lines, "\n"))
 
-	return fmt.Sprintf("Updated %d tasks", len(currentTodos))
+	return fmt.Sprintf("Updated %d tasks", len(rt.currentTodos))
 }

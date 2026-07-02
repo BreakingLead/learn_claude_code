@@ -1,0 +1,58 @@
+package agent
+
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+func TestGetSystemPromptIncludesMemoryAndCachesByContext(t *testing.T) {
+	workdir := t.TempDir()
+	writeFile(t, filepath.Join(workdir, "AGENTS.md"), "# Repository Guidelines\n\nUse explicit runtime state.")
+	writeFile(t, filepath.Join(workdir, "README.md"), "# Project\n\nRun with go run ./cmd/go-agent.")
+	writeFile(t, filepath.Join(workdir, ".agents", "skills", "demo", "SKILL.md"), "---\nname: demo\ndescription: Demo skill\n---\nDetails")
+
+	rt := newAgentRuntime(agentConfig{
+		Model:          "test-model",
+		Workdir:        workdir,
+		CompactDir:     filepath.Join(workdir, ".agent_state", "compact"),
+		ToolResultsDir: filepath.Join(workdir, ".agent_state", "compact", "tool_results"),
+		TranscriptDir:  filepath.Join(workdir, ".agent_state", "compact", "transcripts"),
+	}, nil, nil)
+
+	prompt := rt.getSystemPrompt([]string{"bash", "read_file"})
+	if !strings.Contains(prompt, "Use explicit runtime state.") {
+		t.Fatalf("prompt missing AGENTS.md memory: %s", prompt)
+	}
+	if !strings.Contains(prompt, "**demo**: Demo skill") {
+		t.Fatalf("prompt missing skill catalog: %s", prompt)
+	}
+
+	cachedKey := rt.promptCache.contextKey
+	if again := rt.getSystemPrompt([]string{"read_file", "bash"}); again != prompt {
+		t.Fatalf("expected stable prompt for same tools in different order")
+	}
+	if rt.promptCache.contextKey != cachedKey {
+		t.Fatalf("expected stable context key for same prompt context")
+	}
+
+	writeFile(t, filepath.Join(workdir, "AGENTS.md"), "# Repository Guidelines\n\nChanged memory.")
+	updated := rt.getSystemPrompt([]string{"bash", "read_file"})
+	if updated == prompt {
+		t.Fatalf("expected prompt to refresh after memory content changes")
+	}
+	if rt.promptCache.contextKey == cachedKey {
+		t.Fatalf("expected context key to change after memory content changes")
+	}
+}
+
+func writeFile(t *testing.T, path string, content string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}

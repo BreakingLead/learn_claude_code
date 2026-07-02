@@ -1,4 +1,4 @@
-package main
+package agent
 
 import (
 	"encoding/json"
@@ -14,21 +14,23 @@ import (
 // ToolHandler 统一的工具处理函数签名，接收原始 JSON 输入，返回字符串结果
 type ToolHandler func(input json.RawMessage) string
 
-// TOOL_HANDLERS 工具名 -> 处理函数映射
-var TOOL_HANDLERS = map[string]ToolHandler{
-	"bash":       runBash,
-	"read_file":  runRead,
-	"write_file": runWrite,
-	"edit_file":  runEdit,
-	"glob":       runGlob,
-	"todo_write": runTodoWrite,
-	"task":       spawnSubagent,
-	"load_skill": loadSkill,
+// toolHandlers 返回当前运行时绑定的工具处理函数。
+func (rt *agentRuntime) toolHandlers() map[string]ToolHandler {
+	return map[string]ToolHandler{
+		"bash":       rt.runBash,
+		"read_file":  rt.runRead,
+		"write_file": rt.runWrite,
+		"edit_file":  rt.runEdit,
+		"glob":       rt.runGlob,
+		"todo_write": rt.runTodoWrite,
+		"task":       rt.spawnSubagent,
+		"load_skill": rt.loadSkill,
+	}
 }
 
 // ── 工具实现 ──────────────────────────────────────────
 
-func runBash(raw json.RawMessage) string {
+func (rt *agentRuntime) runBash(raw json.RawMessage) string {
 	var input struct {
 		Command string `json:"command"`
 	}
@@ -36,16 +38,8 @@ func runBash(raw json.RawMessage) string {
 		return fmt.Sprintf("Error: %v", err)
 	}
 
-	// 危险命令拦截（与 permission.go 的 deny list 是两层独立防护）
-	dangerous := []string{"rm -rf /", "sudo", "shutdown", "reboot", "> /dev/"}
-	for _, d := range dangerous {
-		if strings.Contains(input.Command, d) {
-			return "Error: Dangerous command blocked"
-		}
-	}
-
 	cmd := exec.Command("bash", "-c", input.Command)
-	cmd.Dir = WORKDIR
+	cmd.Dir = rt.config.Workdir
 	out, err := cmd.CombinedOutput()
 	result := strings.TrimSpace(string(out))
 
@@ -65,7 +59,7 @@ func runBash(raw json.RawMessage) string {
 	return result
 }
 
-func runRead(raw json.RawMessage) string {
+func (rt *agentRuntime) runRead(raw json.RawMessage) string {
 	var input struct {
 		Path  string `json:"path"`
 		Limit *int   `json:"limit,omitempty"`
@@ -74,7 +68,7 @@ func runRead(raw json.RawMessage) string {
 		return fmt.Sprintf("Error: %v", err)
 	}
 
-	p, err := safePath(input.Path)
+	p, err := rt.safePath(input.Path)
 	if err != nil {
 		return fmt.Sprintf("Error: %v", err)
 	}
@@ -91,7 +85,7 @@ func runRead(raw json.RawMessage) string {
 	return strings.Join(lines, "\n")
 }
 
-func runWrite(raw json.RawMessage) string {
+func (rt *agentRuntime) runWrite(raw json.RawMessage) string {
 	var input struct {
 		Path    string `json:"path"`
 		Content string `json:"content"`
@@ -100,7 +94,7 @@ func runWrite(raw json.RawMessage) string {
 		return fmt.Sprintf("Error: %v", err)
 	}
 
-	p, err := safePath(input.Path)
+	p, err := rt.safePath(input.Path)
 	if err != nil {
 		return fmt.Sprintf("Error: %v", err)
 	}
@@ -114,7 +108,7 @@ func runWrite(raw json.RawMessage) string {
 	return fmt.Sprintf("Wrote %d bytes to %s", len(input.Content), input.Path)
 }
 
-func runEdit(raw json.RawMessage) string {
+func (rt *agentRuntime) runEdit(raw json.RawMessage) string {
 	var input struct {
 		Path    string `json:"path"`
 		OldText string `json:"old_text"`
@@ -124,7 +118,7 @@ func runEdit(raw json.RawMessage) string {
 		return fmt.Sprintf("Error: %v", err)
 	}
 
-	p, err := safePath(input.Path)
+	p, err := rt.safePath(input.Path)
 	if err != nil {
 		return fmt.Sprintf("Error: %v", err)
 	}
@@ -146,7 +140,7 @@ func runEdit(raw json.RawMessage) string {
 	return fmt.Sprintf("Edited %s", input.Path)
 }
 
-func runGlob(raw json.RawMessage) string {
+func (rt *agentRuntime) runGlob(raw json.RawMessage) string {
 	var input struct {
 		Pattern string `json:"pattern"`
 	}
@@ -154,7 +148,7 @@ func runGlob(raw json.RawMessage) string {
 		return fmt.Sprintf("Error: %v", err)
 	}
 
-	pattern := filepath.Join(WORKDIR, input.Pattern)
+	pattern := filepath.Join(rt.config.Workdir, input.Pattern)
 	matches, err := filepath.Glob(pattern)
 	if err != nil {
 		return fmt.Sprintf("Error: %v", err)
@@ -163,7 +157,7 @@ func runGlob(raw json.RawMessage) string {
 	// 过滤并转为相对路径
 	var results []string
 	for _, m := range matches {
-		rel, err := filepath.Rel(WORKDIR, m)
+		rel, err := filepath.Rel(rt.config.Workdir, m)
 		if err != nil || strings.HasPrefix(rel, "..") {
 			continue
 		}
@@ -282,4 +276,14 @@ func buildTools() []anthropic.ToolUnionParam {
 		tools[i] = anthropic.ToolUnionParam{OfTool: &tp}
 	}
 	return tools
+}
+
+func toolNames(tools []anthropic.ToolUnionParam) []string {
+	names := make([]string, 0, len(tools))
+	for _, tool := range tools {
+		if tool.OfTool != nil {
+			names = append(names, tool.OfTool.Name)
+		}
+	}
+	return names
 }

@@ -1,4 +1,4 @@
-package main
+package agent
 
 import (
 	"context"
@@ -21,12 +21,6 @@ const (
 	keepRecent       = 3      // L2 压缩时保留最近几个 tool_result 的完整内容
 	persistThreshold = 30_000 // 单个工具结果超过此阈值时落盘
 	maxBudget        = 200_000
-)
-
-var (
-	compactDir     = filepath.Join(WORKDIR, ".agent_state", "compact")
-	toolResultsDir = filepath.Join(compactDir, "tool_results")
-	transcriptDir  = filepath.Join(compactDir, "transcripts")
 )
 
 // ── 辅助函数 ──────────────────────────────────────────
@@ -168,13 +162,13 @@ func microCompact(messages []anthropic.MessageParam) []anthropic.MessageParam {
 // ── L3: toolResultBudget — 大结果落盘 ────────────────
 
 // persistLargeOutput 将超大工具输出写入文件，返回包含路径和预览的轻量内容
-func persistLargeOutput(toolUseID string, output string) string {
+func (rt *agentRuntime) persistLargeOutput(toolUseID string, output string) string {
 	if len(output) <= persistThreshold {
 		return output
 	}
 
-	os.MkdirAll(toolResultsDir, 0o755)
-	path := filepath.Join(toolResultsDir, safeFilename(toolUseID)+".txt")
+	os.MkdirAll(rt.config.ToolResultsDir, 0o755)
+	path := filepath.Join(rt.config.ToolResultsDir, safeFilename(toolUseID)+".txt")
 
 	// 避免重复写入
 	if _, err := os.Stat(path); os.IsNotExist(err) {
@@ -189,7 +183,7 @@ func persistLargeOutput(toolUseID string, output string) string {
 	return fmt.Sprintf("<persisted-output>\nFull output: %s\nPreview:\n%s\n</persisted-output>", path, preview)
 }
 
-func toolResultBudget(messages []anthropic.MessageParam) []anthropic.MessageParam {
+func (rt *agentRuntime) toolResultBudget(messages []anthropic.MessageParam) []anthropic.MessageParam {
 	if len(messages) == 0 {
 		return messages
 	}
@@ -208,7 +202,7 @@ func toolResultBudget(messages []anthropic.MessageParam) []anthropic.MessagePara
 		contentStr := string(content)
 		if len(contentStr) > persistThreshold {
 			toolUseID := block.ToolUseID
-			persisted := persistLargeOutput(toolUseID, contentStr)
+			persisted := rt.persistLargeOutput(toolUseID, contentStr)
 			block.Content = []anthropic.ToolResultBlockParamContentUnion{
 				{OfText: &anthropic.TextBlockParam{Text: persisted}},
 			}
@@ -220,8 +214,8 @@ func toolResultBudget(messages []anthropic.MessageParam) []anthropic.MessagePara
 
 // ── 轻量压缩组合 ──────────────────────────────────────
 
-func applyLightweightCompaction(messages []anthropic.MessageParam) []anthropic.MessageParam {
-	messages = toolResultBudget(messages)
+func (rt *agentRuntime) applyLightweightCompaction(messages []anthropic.MessageParam) []anthropic.MessageParam {
+	messages = rt.toolResultBudget(messages)
 	messages = snipCompact(messages, 50)
 	messages = microCompact(messages)
 	return messages
@@ -230,9 +224,9 @@ func applyLightweightCompaction(messages []anthropic.MessageParam) []anthropic.M
 // ── L4: autoCompact — LLM 摘要压缩 ──────────────────
 
 // writeTranscript 将对话保存为 JSONL 文件
-func writeTranscript(messages []anthropic.MessageParam) string {
-	os.MkdirAll(transcriptDir, 0o755)
-	path := filepath.Join(transcriptDir, fmt.Sprintf("transcript_%d.jsonl", time.Now().Unix()))
+func (rt *agentRuntime) writeTranscript(messages []anthropic.MessageParam) string {
+	os.MkdirAll(rt.config.TranscriptDir, 0o755)
+	path := filepath.Join(rt.config.TranscriptDir, fmt.Sprintf("transcript_%d.jsonl", time.Now().Unix()))
 	f, err := os.Create(path)
 	if err != nil {
 		return ""
@@ -248,7 +242,7 @@ func writeTranscript(messages []anthropic.MessageParam) string {
 }
 
 // summarizeHistory 调用模型总结历史
-func summarizeHistory(messages []anthropic.MessageParam) string {
+func (rt *agentRuntime) summarizeHistory(messages []anthropic.MessageParam) string {
 	godotenv.Load()
 
 	opts := []option.RequestOption{}
@@ -270,8 +264,8 @@ func summarizeHistory(messages []anthropic.MessageParam) string {
 		"4. remaining work, 5. user constraints.\nBe compact but concrete.\n\n" + convStr
 
 	resp, err := client.Messages.New(ctx, anthropic.MessageNewParams{
-		Model:    anthropic.Model(MODEL),
-		Messages: []anthropic.MessageParam{anthropic.NewUserMessage(anthropic.NewTextBlock(prompt))},
+		Model:     anthropic.Model(rt.config.Model),
+		Messages:  []anthropic.MessageParam{anthropic.NewUserMessage(anthropic.NewTextBlock(prompt))},
 		MaxTokens: 2000,
 	})
 	if err != nil {
@@ -292,35 +286,35 @@ func summarizeHistory(messages []anthropic.MessageParam) string {
 }
 
 // compactHistory 保存 transcript 后压成一条 summary 消息
-func compactHistory(messages []anthropic.MessageParam) []anthropic.MessageParam {
-	path := writeTranscript(messages)
+func (rt *agentRuntime) compactHistory(messages []anthropic.MessageParam) []anthropic.MessageParam {
+	path := rt.writeTranscript(messages)
 	if path != "" {
-		fmt.Printf("[transcript saved: %s]\n", path)
+		rt.emitLine("[transcript saved: %s]", path)
 	}
-	summary := summarizeHistory(messages)
+	summary := rt.summarizeHistory(messages)
 	return []anthropic.MessageParam{
 		anthropic.NewUserMessage(anthropic.NewTextBlock("[Compacted]\n\n" + summary)),
 	}
 }
 
 // maybeCompactHistory 先做轻量压缩，仍超限则升级到 LLM 摘要
-func maybeCompactHistory(messages []anthropic.MessageParam) []anthropic.MessageParam {
-	messages = applyLightweightCompaction(messages)
+func (rt *agentRuntime) maybeCompactHistory(messages []anthropic.MessageParam) []anthropic.MessageParam {
+	messages = rt.applyLightweightCompaction(messages)
 	if estimateSize(messages) <= contextLimit {
 		return messages
 	}
-	return compactHistory(messages)
+	return rt.compactHistory(messages)
 }
 
 // ── Emergency: reactiveCompact ──────────────────────
 
 // reactiveCompact API 返回 400 时的紧急压缩
-func reactiveCompact(messages []anthropic.MessageParam) []anthropic.MessageParam {
-	path := writeTranscript(messages)
+func (rt *agentRuntime) reactiveCompact(messages []anthropic.MessageParam) []anthropic.MessageParam {
+	path := rt.writeTranscript(messages)
 	if path != "" {
-		fmt.Printf("[reactive transcript saved: %s]\n", path)
+		rt.emitLine("[reactive transcript saved: %s]", path)
 	}
-	summary := summarizeHistory(messages)
+	summary := rt.summarizeHistory(messages)
 
 	tailStart := len(messages) - 5
 	if tailStart < 0 {

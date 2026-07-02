@@ -1,4 +1,4 @@
-package main
+package agent
 
 import (
 	"context"
@@ -13,7 +13,7 @@ import (
 )
 
 // spawnSubagent 启动一个子 agent，独立对话历史，仅返回最终摘要
-func spawnSubagent(raw json.RawMessage) string {
+func (rt *agentRuntime) spawnSubagent(raw json.RawMessage) string {
 	var input struct {
 		Description string `json:"description"`
 	}
@@ -40,26 +40,26 @@ func spawnSubagent(raw json.RawMessage) string {
 
 	// 子 agent 可用的工具处理函数
 	subHandlers := map[string]ToolHandler{
-		"bash":       runBash,
-		"read_file":  runRead,
-		"write_file": runWrite,
-		"edit_file":  runEdit,
-		"glob":       runGlob,
+		"bash":       rt.runBash,
+		"read_file":  rt.runRead,
+		"write_file": rt.runWrite,
+		"edit_file":  rt.runEdit,
+		"glob":       rt.runGlob,
 	}
 
 	prefix := colorDim("  │ ")
-	fmt.Printf("%s ┌── %s spawned ──\n", colorDim(""), colorCyan("Subagent"))
+	rt.emitLine("%s ┌── %s spawned ──", colorDim(""), colorCyan("Subagent"))
 
 	messages := []anthropic.MessageParam{
 		anthropic.NewUserMessage(anthropic.NewTextBlock(input.Description)),
 	}
 
-	systemPrompt := getSystemPrompt()
+	systemPrompt := rt.getSystemPrompt(toolNames(subTools))
 
 	// 子 agent 循环，最多 30 轮
 	for turn := 0; turn < 30; turn++ {
 		resp, err := client.Messages.New(ctx, anthropic.MessageNewParams{
-			Model:     anthropic.Model(MODEL),
+			Model:     anthropic.Model(rt.config.Model),
 			System:    []anthropic.TextBlockParam{{Text: systemPrompt}},
 			Messages:  messages,
 			Tools:     subTools,
@@ -84,7 +84,7 @@ func spawnSubagent(raw json.RawMessage) string {
 			}
 
 			// 子 agent 同样受 hook 管控
-			if denied := triggerHooks(EventPreToolUse, tb); denied != nil {
+			if denied := rt.triggerHooks(EventPreToolUse, tb); denied != nil {
 				toolResults = append(toolResults,
 					anthropic.NewToolResultBlock(tb.ID, *denied, true),
 				)
@@ -101,11 +101,11 @@ func spawnSubagent(raw json.RawMessage) string {
 
 			inputJSON, _ := json.Marshal(tb.Input)
 			output := handler(inputJSON)
-			triggerHooks(EventPostToolUse, tb, output)
+			rt.triggerHooks(EventPostToolUse, tb, output)
 
 			// 带缩进的工具调用日志
 			preview := strings.ReplaceAll(truncate(output, 100), "\n", " ")
-			fmt.Printf("%s%s: %s\n", prefix, colorDim(tb.Name), preview)
+			rt.emitLine("%s%s: %s", prefix, colorDim(tb.Name), preview)
 
 			toolResults = append(toolResults,
 				anthropic.NewToolResultBlock(tb.ID, output, false),
@@ -131,7 +131,7 @@ func spawnSubagent(raw json.RawMessage) string {
 		result = "Subagent stopped after 30 turns without final answer."
 	}
 
-	fmt.Printf("%s └── %s done ──\n", colorDim(""), colorCyan("Subagent"))
+	rt.emitLine("%s └── %s done ──", colorDim(""), colorCyan("Subagent"))
 	return result
 }
 
