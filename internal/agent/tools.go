@@ -26,8 +26,10 @@ func (rt *agentRuntime) toolHandlers() map[string]ToolHandler {
 		"task":              rt.spawnSubagent,
 		"load_skill":        rt.loadSkill,
 		"task_create":       rt.runTaskCreate,
-		"task_update":       rt.runTaskUpdate,
 		"task_list":         rt.runTaskList,
+		"task_get":          rt.runTaskGet,
+		"task_claim":        rt.runTaskClaim,
+		"task_complete":     rt.runTaskComplete,
 		"background_bash":   rt.runBackgroundBash,
 		"background_status": rt.runBackgroundStatus,
 		"background_list":   rt.runBackgroundList,
@@ -277,29 +279,17 @@ func buildTools() []anthropic.ToolUnionParam {
 		},
 		{
 			Name:        "task_create",
-			Description: anthropic.String("Create a persistent task in .agents/.tasks/."),
+			Description: anthropic.String("Create a persistent JSON task in .agents/.tasks/. Use blockedBy for dependency IDs."),
 			InputSchema: anthropic.ToolInputSchemaParam{
 				Properties: map[string]any{
-					"title":     map[string]any{"type": "string"},
-					"summary":   map[string]any{"type": "string"},
-					"content":   map[string]any{"type": "string"},
-					"parent_id": map[string]any{"type": "string"},
+					"subject":     map[string]any{"type": "string"},
+					"description": map[string]any{"type": "string"},
+					"blockedBy": map[string]any{
+						"type":  "array",
+						"items": map[string]any{"type": "string"},
+					},
 				},
-				Required: []string{"title"},
-			},
-		},
-		{
-			Name:        "task_update",
-			Description: anthropic.String("Update a persistent task by id."),
-			InputSchema: anthropic.ToolInputSchemaParam{
-				Properties: map[string]any{
-					"id":      map[string]any{"type": "string"},
-					"title":   map[string]any{"type": "string"},
-					"status":  map[string]any{"type": "string"},
-					"summary": map[string]any{"type": "string"},
-					"content": map[string]any{"type": "string"},
-				},
-				Required: []string{"id"},
+				Required: []string{"subject"},
 			},
 		},
 		{
@@ -307,6 +297,37 @@ func buildTools() []anthropic.ToolUnionParam {
 			Description: anthropic.String("List persistent tasks from .agents/.tasks/TASKS.md."),
 			InputSchema: anthropic.ToolInputSchemaParam{
 				Properties: map[string]any{},
+			},
+		},
+		{
+			Name:        "task_get",
+			Description: anthropic.String("Get full task JSON by id."),
+			InputSchema: anthropic.ToolInputSchemaParam{
+				Properties: map[string]any{
+					"id": map[string]any{"type": "string"},
+				},
+				Required: []string{"id"},
+			},
+		},
+		{
+			Name:        "task_claim",
+			Description: anthropic.String("Claim a pending task when all blockedBy dependencies are completed."),
+			InputSchema: anthropic.ToolInputSchemaParam{
+				Properties: map[string]any{
+					"id":    map[string]any{"type": "string"},
+					"owner": map[string]any{"type": "string"},
+				},
+				Required: []string{"id"},
+			},
+		},
+		{
+			Name:        "task_complete",
+			Description: anthropic.String("Mark a task completed and report newly unblocked pending tasks."),
+			InputSchema: anthropic.ToolInputSchemaParam{
+				Properties: map[string]any{
+					"id": map[string]any{"type": "string"},
+				},
+				Required: []string{"id"},
 			},
 		},
 		{

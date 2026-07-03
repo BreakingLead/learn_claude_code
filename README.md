@@ -16,7 +16,7 @@ internal/agent/     agent 实现，只供本项目内部使用
   compact.go        四层上下文压缩：snip → micro → persist → LLM 摘要
   memory.go         持久记忆：加载相关记忆、提取新记忆、维护 MEMORY.md 索引
   recovery.go       错误恢复：context overflow、max_tokens、rate limit、overload
-  task_system.go    持久任务：维护 .agents/.tasks/ 和 TASKS.md 索引
+  task_system.go    持久任务：维护 .agents/.tasks/*.json、依赖检查和 TASKS.md 索引
   background.go     后台命令：启动后台 bash 并注入完成通知
   todo.go           任务列表管理
   subagent.go       子 agent 生成（独立对话、30 轮上限）
@@ -79,11 +79,11 @@ agentLoop(messages)
 
 ```text
 .agents/.tasks/
-├── TASKS.md
-└── *.md
+├── TASKS.md         # 任务索引，注入 system prompt
+└── *.json           # 单个任务：id、subject、description、status、owner、blockedBy
 ```
 
-相关工具：`task_create`、`task_update`、`task_list`。
+相关工具：`task_create`、`task_list`、`task_get`、`task_claim`、`task_complete`。`blockedBy` 中的依赖任务必须全部 `completed` 后，任务才能被认领。
 
 后台命令通过 `background_bash` 启动，`background_status` 查看单个 job，`background_list` 列出所有 job。后台 job 完成后会在下一次模型调用前注入 `<background>` 内部消息，并在右侧日志显示完成状态。
 
