@@ -65,6 +65,35 @@ func TestGetSystemPromptEmitsAssembledThenCacheHit(t *testing.T) {
 	}
 }
 
+func TestTaskSystemPromptBlockFollowsModuleSwitch(t *testing.T) {
+	workdir := t.TempDir()
+	writeFile(t, filepath.Join(workdir, ".agents", ".tasks", "TASKS.md"), "# Task Index\n\n- build api")
+
+	enabled := newAgentRuntime(testConfig(workdir), nil, nil)
+	if prompt := enabled.getSystemPrompt([]string{"bash"}); !strings.Contains(prompt, "build api") {
+		t.Fatalf("expected enabled task_system module to contribute task index: %s", prompt)
+	}
+
+	config := testConfig(workdir)
+	config.DisabledModules = map[string]bool{"task_system": true}
+	disabled := newAgentRuntime(config, nil, nil)
+	if prompt := disabled.getSystemPrompt([]string{"bash"}); strings.Contains(prompt, "build api") {
+		t.Fatalf("expected disabled task_system module to remove task index: %s", prompt)
+	}
+}
+
+func TestParseDisabledModulesNormalizesValues(t *testing.T) {
+	got := parseDisabledModules(" Memory, cron ,,BACKGROUND ")
+	for _, want := range []string{"memory", "cron", "background"} {
+		if !got[want] {
+			t.Fatalf("expected disabled module %q in %#v", want, got)
+		}
+	}
+	if got[""] {
+		t.Fatalf("empty module id should be ignored: %#v", got)
+	}
+}
+
 func testConfig(workdir string) agentConfig {
 	return agentConfig{
 		Model:              "test-model",

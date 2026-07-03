@@ -137,6 +137,9 @@ func newBackgroundRegistry(emit func(format string, args ...any)) *backgroundReg
 
 // runBackgroundBash 启动后台 bash 命令并立即返回 job id。
 func (rt *agentRuntime) runBackgroundBash(raw json.RawMessage) string {
+	if rt == nil || rt.background == nil {
+		return "Error: background module is disabled"
+	}
 	var input struct {
 		Command        string `json:"command"`
 		TimeoutSeconds *int   `json:"timeout_seconds"`
@@ -158,6 +161,9 @@ func (rt *agentRuntime) runBackgroundBash(raw json.RawMessage) string {
 
 // runBackgroundStatus 返回单个后台 job 的当前状态和输出预览。
 func (rt *agentRuntime) runBackgroundStatus(raw json.RawMessage) string {
+	if rt == nil || rt.background == nil {
+		return "Error: background module is disabled"
+	}
 	var input struct {
 		ID string `json:"id"`
 	}
@@ -173,6 +179,9 @@ func (rt *agentRuntime) runBackgroundStatus(raw json.RawMessage) string {
 
 // runBackgroundList 列出所有后台 job 的简要状态。
 func (rt *agentRuntime) runBackgroundList(raw json.RawMessage) string {
+	if rt == nil || rt.background == nil {
+		return "Error: background module is disabled"
+	}
 	jobs := rt.background.list()
 	if len(jobs) == 0 {
 		return "(no background jobs)"
@@ -186,6 +195,9 @@ func (rt *agentRuntime) runBackgroundList(raw json.RawMessage) string {
 
 // injectBackgroundNotifications 将已完成后台任务作为内部消息注入对话历史。
 func (rt *agentRuntime) injectBackgroundNotifications(messages *[]anthropic.MessageParam) {
+	if rt == nil || rt.background == nil {
+		return
+	}
 	results := rt.background.drainCompleted()
 	if len(results) == 0 {
 		return

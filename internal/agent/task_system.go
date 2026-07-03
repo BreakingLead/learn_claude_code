@@ -12,6 +12,7 @@ package agent
 // 所有路径来自 agentConfig，所有工具函数挂在 agentRuntime 上，不使用包级变量。
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
@@ -59,6 +60,17 @@ func (m *taskSystemModule) ToolHandlers() map[string]ToolHandler {
 		return map[string]ToolHandler{}
 	}
 	return m.rt.taskSystemToolHandlers()
+}
+
+// PromptBlocks 将持久任务索引作为任务系统自己的上下文贡献给 system prompt。
+func (m *taskSystemModule) PromptBlocks(ctx context.Context, req PromptRequest) ([]PromptBlock, error) {
+	if m.rt == nil {
+		return nil, nil
+	}
+	candidates := []promptFileCandidate{
+		{module: m.ID(), name: "Task Index", path: m.rt.config.TaskIndex},
+	}
+	return readPromptFiles(candidates, 6000), nil
 }
 
 // RuntimeSnapshot 暴露任务数量和状态分布，避免 Debug tab 直接读任务实现细节。

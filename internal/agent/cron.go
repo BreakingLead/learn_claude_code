@@ -398,6 +398,9 @@ func cronFieldPartMatches(part string, value int, minValue int, maxValue int) bo
 }
 
 func (rt *agentRuntime) runScheduleCron(raw json.RawMessage) string {
+	if rt == nil || rt.cron == nil {
+		return "Error: cron module is disabled"
+	}
 	var input struct {
 		Cron      string `json:"cron"`
 		Prompt    string `json:"prompt"`
@@ -423,6 +426,9 @@ func (rt *agentRuntime) runScheduleCron(raw json.RawMessage) string {
 }
 
 func (rt *agentRuntime) runListCrons(raw json.RawMessage) string {
+	if rt == nil || rt.cron == nil {
+		return "Error: cron module is disabled"
+	}
 	jobs := rt.cron.list()
 	if len(jobs) == 0 {
 		return "(no scheduled cron jobs)"
@@ -435,6 +441,9 @@ func (rt *agentRuntime) runListCrons(raw json.RawMessage) string {
 }
 
 func (rt *agentRuntime) runCancelCron(raw json.RawMessage) string {
+	if rt == nil || rt.cron == nil {
+		return "Error: cron module is disabled"
+	}
 	var input struct {
 		ID string `json:"id"`
 	}

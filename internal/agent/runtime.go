@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -53,6 +54,7 @@ type agentConfig struct {
 	RetryBaseDelay        time.Duration
 	RetryMaxDelay         time.Duration
 	BackgroundTimeout     time.Duration
+	DisabledModules       map[string]bool
 }
 
 type promptCache struct {
@@ -85,6 +87,7 @@ func newAgentConfig() (agentConfig, error) {
 		RetryBaseDelay:        500 * time.Millisecond,
 		RetryMaxDelay:         8 * time.Second,
 		BackgroundTimeout:     10 * time.Minute,
+		DisabledModules:       parseDisabledModules(os.Getenv("BEE_AGENT_DISABLED_MODULES")),
 	}, nil
 }
 
@@ -100,23 +103,18 @@ func newAgentRuntime(config agentConfig, events chan<- uiEvent, approvals <-chan
 		events:    events,
 		approvals: approvals,
 	}
-	rt.background = newBackgroundRegistry(rt.emitLine)
-	rt.cron = newCronScheduler(config.ScheduledTasksPath, rt.emitLine, rt.notifyCronQueued)
-	if err := rt.cron.loadDurableJobs(); err != nil {
-		rt.emitLine("[cron] load durable jobs: %v", err)
+	if rt.moduleEnabled("background") {
+		rt.background = newBackgroundRegistry(rt.emitLine)
+	}
+	if rt.moduleEnabled("cron") {
+		rt.cron = newCronScheduler(config.ScheduledTasksPath, rt.emitLine, rt.notifyCronQueued)
+		if err := rt.cron.loadDurableJobs(); err != nil {
+			rt.emitLine("[cron] load durable jobs: %v", err)
+		}
 	}
 	rt.recovery = newRecoveryState(config)
 	rt.todo = &todoModule{}
-	rt.modules = newModuleManager(
-		&projectContextModule{},
-		&skillModule{rt: rt},
-		rt.todo,
-		&memoryContextModule{},
-		&subagentModule{rt: rt},
-		&taskSystemModule{rt: rt},
-		&backgroundModule{rt: rt},
-		&cronModule{rt: rt},
-	)
+	rt.modules = newModuleManager(rt.configuredModules()...)
 	if err := rt.modules.init(ModuleContext{
 		Workdir: config.Workdir,
 		Config:  config,
@@ -126,6 +124,45 @@ func newAgentRuntime(config agentConfig, events chan<- uiEvent, approvals <-chan
 	}
 	rt.initHooks()
 	return rt
+}
+
+func parseDisabledModules(raw string) map[string]bool {
+	disabled := map[string]bool{}
+	for _, part := range strings.Split(raw, ",") {
+		name := strings.ToLower(strings.TrimSpace(part))
+		if name == "" {
+			continue
+		}
+		disabled[name] = true
+	}
+	return disabled
+}
+
+func (rt *agentRuntime) moduleEnabled(id string) bool {
+	if rt == nil {
+		return false
+	}
+	return !rt.config.DisabledModules[id]
+}
+
+func (rt *agentRuntime) configuredModules() []Module {
+	candidates := []Module{
+		&projectContextModule{},
+		&skillModule{rt: rt},
+		rt.todo,
+		&memoryContextModule{},
+		&subagentModule{rt: rt},
+		&taskSystemModule{rt: rt},
+		&backgroundModule{rt: rt},
+		&cronModule{rt: rt},
+	}
+	modules := make([]Module, 0, len(candidates))
+	for _, module := range candidates {
+		if rt.moduleEnabled(module.ID()) {
+			modules = append(modules, module)
+		}
+	}
+	return modules
 }
 
 func (rt *agentRuntime) startCronScheduler() {

@@ -60,11 +60,11 @@ func (rt *agentRuntime) mainAgentSpec() agentSpec {
 		DisplayName:                   "Agent",
 		ToolNames:                     toolNames(rt.buildTools()),
 		UseRecovery:                   true,
-		InjectRelevantMemories:        true,
-		InjectBackgroundNotifications: true,
+		InjectRelevantMemories:        rt.moduleEnabled("memory"),
+		InjectBackgroundNotifications: rt.moduleEnabled("background"),
 		UseCompaction:                 true,
 		UseStopHooks:                  true,
-		ExtractMemoriesOnStop:         true,
+		ExtractMemoriesOnStop:         rt.moduleEnabled("memory"),
 		ToolPreviewLimit:              200,
 	}
 }

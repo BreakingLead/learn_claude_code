@@ -211,8 +211,7 @@ func (m *moduleManager) afterToolRound(ctx context.Context, event ToolRoundEvent
 }
 
 type projectContextModule struct {
-	workdir   string
-	taskIndex string
+	workdir string
 }
 
 // ID 返回项目上下文模块标识。
@@ -223,7 +222,6 @@ func (m *projectContextModule) ID() string {
 // Init 保存项目上下文模块需要的路径配置。
 func (m *projectContextModule) Init(ctx ModuleContext) error {
 	m.workdir = ctx.Workdir
-	m.taskIndex = ctx.Config.TaskIndex
 	return nil
 }
 
@@ -232,7 +230,6 @@ func (m *projectContextModule) PromptBlocks(ctx context.Context, req PromptReque
 	candidates := []promptFileCandidate{
 		{module: m.ID(), name: "Repository Guidelines", path: filepath.Join(m.workdir, "AGENTS.md")},
 		{module: m.ID(), name: "Project README", path: filepath.Join(m.workdir, "README.md")},
-		{module: m.ID(), name: "Task Index", path: m.taskIndex},
 	}
 	return readPromptFiles(candidates, 6000), nil
 }
@@ -240,8 +237,7 @@ func (m *projectContextModule) PromptBlocks(ctx context.Context, req PromptReque
 // RuntimeSnapshot 返回项目上下文模块读取的主要文件位置。
 func (m *projectContextModule) RuntimeSnapshot() any {
 	return map[string]any{
-		"workdir":   m.workdir,
-		"taskIndex": m.taskIndex,
+		"workdir": m.workdir,
 	}
 }
 

@@ -69,6 +69,40 @@ func TestRuntimeSnapshotsComeFromModules(t *testing.T) {
 	}
 }
 
+func TestDisabledModulesRemoveToolsSnapshotsAndLifecycle(t *testing.T) {
+	config := testConfig(t.TempDir())
+	config.DisabledModules = map[string]bool{
+		"skills":      true,
+		"todo":        true,
+		"memory":      true,
+		"subagent":    true,
+		"task_system": true,
+		"background":  true,
+		"cron":        true,
+	}
+	rt := newAgentRuntime(config, nil, nil)
+	names := toolNames(rt.buildTools())
+	snapshots := rt.modules.runtimeSnapshots()
+	spec := rt.mainAgentSpec()
+
+	for _, disabledTool := range []string{"load_skill", "todo_write", "task", "task_create", "background_bash", "schedule_cron"} {
+		if hasString(names, disabledTool) {
+			t.Fatalf("disabled module tool %q should not be exposed in %v", disabledTool, names)
+		}
+	}
+	for _, disabledModule := range []string{"skills", "todo", "memory", "subagent", "task_system", "background", "cron"} {
+		if _, ok := snapshots[disabledModule]; ok {
+			t.Fatalf("disabled module %q should not expose snapshot: %#v", disabledModule, snapshots)
+		}
+	}
+	if rt.background != nil || rt.cron != nil {
+		t.Fatalf("disabled background/cron should not initialize registries")
+	}
+	if spec.InjectRelevantMemories || spec.ExtractMemoriesOnStop || spec.InjectBackgroundNotifications {
+		t.Fatalf("disabled lifecycle modules should turn off main agent injections: %+v", spec)
+	}
+}
+
 func TestFilterToolHandlersKeepsOnlyRequestedNames(t *testing.T) {
 	rt := newAgentRuntime(testConfig(t.TempDir()), nil, nil)
 	handlers := filterToolHandlers(rt.toolHandlers(), []string{"read_file", "glob"})
