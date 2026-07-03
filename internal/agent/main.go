@@ -11,6 +11,7 @@ import (
 
 // agentLoop 是主 agent 的薄包装；具体执行状态机由 runAgent 统一负责。
 func (rt *agentRuntime) agentLoop(ctx context.Context, client anthropic.Client, messages *[]anthropic.MessageParam) {
+	rt.injectScheduledCronMessages(messages)
 	rt.runAgent(ctx, client, rt.mainAgentSpec(), messages)
 }
 

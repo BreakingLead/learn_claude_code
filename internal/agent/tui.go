@@ -104,6 +104,7 @@ func runTUI(ctx context.Context, client anthropic.Client) {
 		return
 	}
 	rt := newAgentRuntime(config, events, approvals)
+	rt.startCronScheduler()
 
 	p := tea.NewProgram(newTUIModel(ctx, client, rt, events, approvals), tea.WithAltScreen(), tea.WithMouseCellMotion())
 	if _, err := p.Run(); err != nil {
@@ -260,12 +261,23 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.status = "approval"
 			m.logs = append(m.logs, m.styles.warn.Render(event.Text), m.styles.warn.Render("按 y 允许，按 n 拒绝。"))
 			m.refreshViews()
+
+		case uiEventCronQueued:
+			m.logs = append(m.logs, m.styles.log.Render(event.Text))
+			if cmd := m.startScheduledCronIfIdle(); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+			m.refreshViews()
+			cmds = append(cmds, waitForUIEvent(m.events))
 		}
 
 	case agentDoneMsg:
 		m.history = msg.History
 		m.running = false
 		m.status = "ready"
+		if cmd := m.startScheduledCronIfIdle(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 		m.refreshViews()
 		cmds = append(cmds, waitForUIEvent(m.events))
 	}
@@ -282,6 +294,15 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	return m, tea.Batch(cmds...)
+}
+
+func (m *tuiModel) startScheduledCronIfIdle() tea.Cmd {
+	if m.running || m.approving || m.rt == nil || m.rt.cron == nil || !m.rt.cron.hasQueue() {
+		return nil
+	}
+	m.running = true
+	m.status = "scheduled"
+	return runAgentTurn(m.ctx, m.client, m.rt, append([]anthropic.MessageParam(nil), m.history...))
 }
 
 func (m *tuiModel) resize() {
@@ -683,6 +704,13 @@ func (m tuiModel) renderRuntimeDebug() string {
 		backgroundJobs = m.rt.background.list()
 	}
 
+	cronJobs := []cronJob{}
+	cronQueueCount := 0
+	if m.rt.cron != nil {
+		cronJobs = m.rt.cron.list()
+		cronQueueCount = m.rt.cron.queueCount()
+	}
+
 	snapshot := map[string]any{
 		"status":            m.status,
 		"running":           m.running,
@@ -706,6 +734,8 @@ func (m tuiModel) renderRuntimeDebug() string {
 		"hooks":          hookCounts,
 		"modules":        moduleIDs,
 		"backgroundJobs": backgroundJobs,
+		"cronJobs":       cronJobs,
+		"cronQueueCount": cronQueueCount,
 	}
 	return marshalDebugJSON(snapshot)
 }

@@ -32,6 +32,9 @@ func (rt *agentRuntime) toolHandlers() map[string]ToolHandler {
 		"background_bash":   rt.runBackgroundBash,
 		"background_status": rt.runBackgroundStatus,
 		"background_list":   rt.runBackgroundList,
+		"schedule_cron":     rt.runScheduleCron,
+		"list_crons":        rt.runListCrons,
+		"cancel_cron":       rt.runCancelCron,
 	}
 	if rt.modules != nil {
 		for name, handler := range rt.modules.toolHandlers() {
@@ -352,6 +355,36 @@ func buildBaseToolParams() []anthropic.ToolParam {
 			Description: anthropic.String("List background shell jobs."),
 			InputSchema: anthropic.ToolInputSchemaParam{
 				Properties: map[string]any{},
+			},
+		},
+		{
+			Name:        "schedule_cron",
+			Description: anthropic.String("Schedule a prompt to be delivered automatically using a 5-field cron expression."),
+			InputSchema: anthropic.ToolInputSchemaParam{
+				Properties: map[string]any{
+					"cron":      map[string]any{"type": "string", "description": "Five-field cron expression, e.g. */5 * * * * or 0 9 * * 1-5."},
+					"prompt":    map[string]any{"type": "string"},
+					"recurring": map[string]any{"type": "boolean", "description": "Defaults to true."},
+					"durable":   map[string]any{"type": "boolean", "description": "Defaults to true; durable jobs persist to .scheduled_tasks.json."},
+				},
+				Required: []string{"cron", "prompt"},
+			},
+		},
+		{
+			Name:        "list_crons",
+			Description: anthropic.String("List scheduled cron jobs."),
+			InputSchema: anthropic.ToolInputSchemaParam{
+				Properties: map[string]any{},
+			},
+		},
+		{
+			Name:        "cancel_cron",
+			Description: anthropic.String("Cancel a scheduled cron job by id."),
+			InputSchema: anthropic.ToolInputSchemaParam{
+				Properties: map[string]any{
+					"id": map[string]any{"type": "string"},
+				},
+				Required: []string{"id"},
 			},
 		},
 	}

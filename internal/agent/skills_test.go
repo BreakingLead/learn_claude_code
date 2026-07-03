@@ -67,16 +67,17 @@ func TestGetSystemPromptEmitsAssembledThenCacheHit(t *testing.T) {
 
 func testConfig(workdir string) agentConfig {
 	return agentConfig{
-		Model:             "test-model",
-		Workdir:           workdir,
-		CompactDir:        filepath.Join(workdir, ".agents", "compact"),
-		ToolResultsDir:    filepath.Join(workdir, ".agents", "compact", "tool_results"),
-		TranscriptDir:     filepath.Join(workdir, ".agents", "compact", "transcripts"),
-		MemoryDir:         filepath.Join(workdir, ".agents", ".memory"),
-		MemoryIndex:       filepath.Join(workdir, ".agents", ".memory", "MEMORY.md"),
-		TaskDir:           filepath.Join(workdir, ".agents", ".tasks"),
-		TaskIndex:         filepath.Join(workdir, ".agents", ".tasks", "TASKS.md"),
-		BackgroundTimeout: 10 * time.Minute,
+		Model:              "test-model",
+		Workdir:            workdir,
+		CompactDir:         filepath.Join(workdir, ".agents", "compact"),
+		ToolResultsDir:     filepath.Join(workdir, ".agents", "compact", "tool_results"),
+		TranscriptDir:      filepath.Join(workdir, ".agents", "compact", "transcripts"),
+		MemoryDir:          filepath.Join(workdir, ".agents", ".memory"),
+		MemoryIndex:        filepath.Join(workdir, ".agents", ".memory", "MEMORY.md"),
+		TaskDir:            filepath.Join(workdir, ".agents", ".tasks"),
+		TaskIndex:          filepath.Join(workdir, ".agents", ".tasks", "TASKS.md"),
+		ScheduledTasksPath: filepath.Join(workdir, ".scheduled_tasks.json"),
+		BackgroundTimeout:  10 * time.Minute,
 	}
 }
 

@@ -12,6 +12,7 @@ type uiEventKind int
 const (
 	uiEventLog uiEventKind = iota
 	uiEventApproval
+	uiEventCronQueued
 )
 
 type uiEvent struct {
@@ -27,6 +28,7 @@ type agentRuntime struct {
 	modules     *moduleManager
 	todo        *todoModule
 	background  *backgroundRegistry
+	cron        *cronScheduler
 	promptCache promptCache
 	memoryTurns int
 	recovery    recoveryState
@@ -43,6 +45,7 @@ type agentConfig struct {
 	MemoryIndex           string
 	TaskDir               string
 	TaskIndex             string
+	ScheduledTasksPath    string
 	DefaultTokens         int64
 	EscalatedTokens       int64
 	MaxRecoveryRetries    int
@@ -74,6 +77,7 @@ func newAgentConfig() (agentConfig, error) {
 		MemoryIndex:           filepath.Join(workdir, ".agents", ".memory", "MEMORY.md"),
 		TaskDir:               filepath.Join(workdir, ".agents", ".tasks"),
 		TaskIndex:             filepath.Join(workdir, ".agents", ".tasks", "TASKS.md"),
+		ScheduledTasksPath:    filepath.Join(workdir, ".scheduled_tasks.json"),
 		DefaultTokens:         8000,
 		EscalatedTokens:       16000,
 		MaxRecoveryRetries:    3,
@@ -97,6 +101,10 @@ func newAgentRuntime(config agentConfig, events chan<- uiEvent, approvals <-chan
 		approvals: approvals,
 	}
 	rt.background = newBackgroundRegistry(rt.emitLine)
+	rt.cron = newCronScheduler(config.ScheduledTasksPath, rt.emitLine, rt.notifyCronQueued)
+	if err := rt.cron.loadDurableJobs(); err != nil {
+		rt.emitLine("[cron] load durable jobs: %v", err)
+	}
 	rt.recovery = newRecoveryState(config)
 	rt.todo = &todoModule{}
 	rt.modules = newModuleManager(
@@ -113,6 +121,24 @@ func newAgentRuntime(config agentConfig, events chan<- uiEvent, approvals <-chan
 	}
 	rt.initHooks()
 	return rt
+}
+
+func (rt *agentRuntime) startCronScheduler() {
+	if rt != nil && rt.cron != nil {
+		rt.cron.start()
+	}
+}
+
+func (rt *agentRuntime) notifyCronQueued(count int) {
+	if count <= 0 {
+		return
+	}
+	text := fmt.Sprintf("[cron] queued %d scheduled task(s)", count)
+	if rt == nil || rt.events == nil {
+		fmt.Println(text)
+		return
+	}
+	rt.events <- uiEvent{Kind: uiEventCronQueued, Text: text}
 }
 
 // emitLine 是运行时日志出口；显式持有 UI 通道，避免包级全局变量。
