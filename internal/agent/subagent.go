@@ -12,6 +12,46 @@ import (
 	"github.com/joho/godotenv"
 )
 
+type subagentModule struct {
+	rt *agentRuntime
+}
+
+// ID 返回子 agent 模块标识。
+func (m *subagentModule) ID() string {
+	return "subagent"
+}
+
+// Init 子 agent 模块没有额外初始化状态；runtime 在构造时显式注入。
+func (m *subagentModule) Init(ctx ModuleContext) error {
+	return nil
+}
+
+// ToolDefinitions 注册启动子 agent 的 task 工具。
+func (m *subagentModule) ToolDefinitions() []anthropic.ToolParam {
+	return subagentToolDefinitions()
+}
+
+// ToolHandlers 绑定 task 工具到当前 runtime。
+func (m *subagentModule) ToolHandlers() map[string]ToolHandler {
+	if m.rt == nil {
+		return map[string]ToolHandler{}
+	}
+	return m.rt.subagentToolHandlers()
+}
+
+// RuntimeSnapshot 暴露子 agent 的固定能力边界。
+func (m *subagentModule) RuntimeSnapshot() any {
+	if m.rt == nil {
+		return nil
+	}
+	return map[string]any{
+		"tool":              "task",
+		"subagentTools":     m.rt.subagentSpec().ToolNames,
+		"subagentMaxTurns":  m.rt.subagentSpec().MaxTurns,
+		"subagentMaxTokens": m.rt.subagentSpec().MaxTokens,
+	}
+}
+
 func (rt *agentRuntime) subagentToolHandlers() map[string]ToolHandler {
 	return map[string]ToolHandler{
 		"task": rt.spawnSubagent,

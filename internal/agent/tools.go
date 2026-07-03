@@ -17,11 +17,6 @@ type ToolHandler func(input json.RawMessage) string
 // toolHandlers 返回当前运行时绑定的工具处理函数。
 func (rt *agentRuntime) toolHandlers() map[string]ToolHandler {
 	handlers := rt.coreToolHandlers()
-	mergeToolHandlers(handlers, rt.subagentToolHandlers())
-	mergeToolHandlers(handlers, rt.skillToolHandlers())
-	mergeToolHandlers(handlers, rt.taskSystemToolHandlers())
-	mergeToolHandlers(handlers, rt.backgroundToolHandlers())
-	mergeToolHandlers(handlers, rt.cronToolHandlers())
 	if rt.modules != nil {
 		mergeToolHandlers(handlers, rt.modules.toolHandlers())
 	}
@@ -190,11 +185,6 @@ func (rt *agentRuntime) runGlob(raw json.RawMessage) string {
 
 func (rt *agentRuntime) buildTools() []anthropic.ToolUnionParam {
 	toolParams := buildCoreToolParams()
-	toolParams = append(toolParams, subagentToolDefinitions()...)
-	toolParams = append(toolParams, skillToolDefinitions()...)
-	toolParams = append(toolParams, taskSystemToolDefinitions()...)
-	toolParams = append(toolParams, backgroundToolDefinitions()...)
-	toolParams = append(toolParams, cronToolDefinitions()...)
 	if rt != nil && rt.modules != nil {
 		toolParams = append(toolParams, rt.modules.toolDefinitions()...)
 	}

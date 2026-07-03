@@ -37,6 +37,44 @@ type cronScheduler struct {
 	notify    func(count int)
 }
 
+type cronModule struct {
+	rt *agentRuntime
+}
+
+// ID 返回 cron 调度模块标识。
+func (m *cronModule) ID() string {
+	return "cron"
+}
+
+// Init cron scheduler 由 runtime 显式创建和加载持久任务，这里不重复初始化。
+func (m *cronModule) Init(ctx ModuleContext) error {
+	return nil
+}
+
+// ToolDefinitions 注册 cron 调度工具。
+func (m *cronModule) ToolDefinitions() []anthropic.ToolParam {
+	return cronToolDefinitions()
+}
+
+// ToolHandlers 绑定 cron 调度工具到当前 runtime。
+func (m *cronModule) ToolHandlers() map[string]ToolHandler {
+	if m.rt == nil {
+		return map[string]ToolHandler{}
+	}
+	return m.rt.cronToolHandlers()
+}
+
+// RuntimeSnapshot 暴露调度器队列和任务摘要。
+func (m *cronModule) RuntimeSnapshot() any {
+	if m.rt == nil || m.rt.cron == nil {
+		return nil
+	}
+	return map[string]any{
+		"jobs":       m.rt.cron.list(),
+		"queueCount": m.rt.cron.queueCount(),
+	}
+}
+
 func (rt *agentRuntime) cronToolHandlers() map[string]ToolHandler {
 	return map[string]ToolHandler{
 		"schedule_cron": rt.runScheduleCron,

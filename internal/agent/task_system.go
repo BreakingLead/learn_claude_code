@@ -34,6 +34,49 @@ type taskRecord struct {
 	Path        string   `json:"-"`
 }
 
+type taskSystemModule struct {
+	rt *agentRuntime
+}
+
+// ID 返回持久任务系统模块标识。
+func (m *taskSystemModule) ID() string {
+	return "task_system"
+}
+
+// Init 持久任务系统的路径来自 runtime config，无需额外状态。
+func (m *taskSystemModule) Init(ctx ModuleContext) error {
+	return nil
+}
+
+// ToolDefinitions 注册持久任务系统工具。
+func (m *taskSystemModule) ToolDefinitions() []anthropic.ToolParam {
+	return taskSystemToolDefinitions()
+}
+
+// ToolHandlers 绑定持久任务系统工具到当前 runtime。
+func (m *taskSystemModule) ToolHandlers() map[string]ToolHandler {
+	if m.rt == nil {
+		return map[string]ToolHandler{}
+	}
+	return m.rt.taskSystemToolHandlers()
+}
+
+// RuntimeSnapshot 暴露任务数量和状态分布，避免 Debug tab 直接读任务实现细节。
+func (m *taskSystemModule) RuntimeSnapshot() any {
+	if m.rt == nil {
+		return nil
+	}
+	statusCounts := map[string]int{}
+	for _, task := range m.rt.loadTaskRecords() {
+		statusCounts[task.Status]++
+	}
+	return map[string]any{
+		"taskDir":      m.rt.config.TaskDir,
+		"taskIndex":    m.rt.config.TaskIndex,
+		"statusCounts": statusCounts,
+	}
+}
+
 func (rt *agentRuntime) taskSystemToolHandlers() map[string]ToolHandler {
 	return map[string]ToolHandler{
 		"task_create":   rt.runTaskCreate,

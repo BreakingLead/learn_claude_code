@@ -693,22 +693,10 @@ func (m tuiModel) renderRuntimeDebug() string {
 	}
 
 	moduleIDs := []string{}
+	moduleSnapshots := map[string]any{}
 	if m.rt.modules != nil {
-		for _, module := range m.rt.modules.modules {
-			moduleIDs = append(moduleIDs, module.ID())
-		}
-	}
-
-	backgroundJobs := []backgroundJob{}
-	if m.rt.background != nil {
-		backgroundJobs = m.rt.background.list()
-	}
-
-	cronJobs := []cronJob{}
-	cronQueueCount := 0
-	if m.rt.cron != nil {
-		cronJobs = m.rt.cron.list()
-		cronQueueCount = m.rt.cron.queueCount()
+		moduleIDs = m.rt.modules.moduleIDs()
+		moduleSnapshots = m.rt.modules.runtimeSnapshots()
 	}
 
 	snapshot := map[string]any{
@@ -718,8 +706,6 @@ func (m tuiModel) renderRuntimeDebug() string {
 		"activeTab":         m.activeTabName(),
 		"messageCount":      len(m.history),
 		"logCount":          len(m.logs),
-		"currentTodos":      m.rt.todo.currentTodos,
-		"roundsSinceTodo":   m.rt.todo.roundsSinceTodo,
 		"memoryTurns":       m.rt.memoryTurns,
 		"promptCacheKey":    m.rt.promptCache.contextKey,
 		"promptCacheLength": len(m.rt.promptCache.prompt),
@@ -730,12 +716,10 @@ func (m tuiModel) renderRuntimeDebug() string {
 			"retries":               m.rt.recovery.retries,
 			"maxTokenContinuations": m.rt.recovery.maxTokenContinuations,
 		},
-		"config":         m.rt.config,
-		"hooks":          hookCounts,
-		"modules":        moduleIDs,
-		"backgroundJobs": backgroundJobs,
-		"cronJobs":       cronJobs,
-		"cronQueueCount": cronQueueCount,
+		"config":      m.rt.config,
+		"hooks":       hookCounts,
+		"modules":     moduleIDs,
+		"moduleState": moduleSnapshots,
 	}
 	return marshalDebugJSON(snapshot)
 }

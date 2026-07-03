@@ -109,8 +109,13 @@ func newAgentRuntime(config agentConfig, events chan<- uiEvent, approvals <-chan
 	rt.todo = &todoModule{}
 	rt.modules = newModuleManager(
 		&projectContextModule{},
+		&skillModule{rt: rt},
 		rt.todo,
 		&memoryContextModule{},
+		&subagentModule{rt: rt},
+		&taskSystemModule{rt: rt},
+		&backgroundModule{rt: rt},
+		&cronModule{rt: rt},
 	)
 	if err := rt.modules.init(ModuleContext{
 		Workdir: config.Workdir,

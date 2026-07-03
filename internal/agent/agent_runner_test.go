@@ -58,6 +58,17 @@ func TestMainAgentToolsIncludeFileLocalDefinitions(t *testing.T) {
 	}
 }
 
+func TestRuntimeSnapshotsComeFromModules(t *testing.T) {
+	rt := newAgentRuntime(testConfig(t.TempDir()), nil, nil)
+	snapshots := rt.modules.runtimeSnapshots()
+
+	for _, want := range []string{"project", "skills", "todo", "memory", "subagent", "task_system", "background", "cron"} {
+		if _, ok := snapshots[want]; !ok {
+			t.Fatalf("missing module snapshot %q in %#v", want, snapshots)
+		}
+	}
+}
+
 func TestFilterToolHandlersKeepsOnlyRequestedNames(t *testing.T) {
 	rt := newAgentRuntime(testConfig(t.TempDir()), nil, nil)
 	handlers := filterToolHandlers(rt.toolHandlers(), []string{"read_file", "glob"})

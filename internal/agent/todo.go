@@ -69,6 +69,14 @@ func (m *todoModule) ToolHandlers() map[string]ToolHandler {
 	}
 }
 
+// RuntimeSnapshot 暴露当前会话 todo 状态给 Debug tab。
+func (m *todoModule) RuntimeSnapshot() any {
+	return map[string]any{
+		"currentTodos":    m.currentTodos,
+		"roundsSinceTodo": m.roundsSinceTodo,
+	}
+}
+
 // BeforeModel 在长时间未更新 todo 时注入提醒；只有暴露 todo_write 的 agent 会触发。
 func (m *todoModule) BeforeModel(ctx context.Context, req TurnRequest) []anthropic.MessageParam {
 	if !hasString(req.ToolNames, "todo_write") || len(req.Messages) == 0 {

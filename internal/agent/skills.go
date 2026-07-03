@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -16,6 +17,70 @@ type SkillInfo struct {
 	Name        string
 	Description string
 	Content     string // SKILL.md 原始内容
+}
+
+type skillModule struct {
+	rt      *agentRuntime
+	workdir string
+}
+
+// ID 返回技能模块标识。
+func (m *skillModule) ID() string {
+	return "skills"
+}
+
+// Init 保存技能扫描所需的工作区路径。
+func (m *skillModule) Init(ctx ModuleContext) error {
+	m.workdir = ctx.Workdir
+	return nil
+}
+
+// PromptBlocks 把技能目录作为模块 prompt block 贡献给 system prompt。
+func (m *skillModule) PromptBlocks(ctx context.Context, req PromptRequest) ([]PromptBlock, error) {
+	if m.rt == nil {
+		return nil, nil
+	}
+	content := "Skills available:\n" + listSkills(sortedSkills(m.rt.scanSkills()))
+	if hasString(req.ToolNames, "load_skill") {
+		content += "\n\nUse load_skill to get full skill details when needed."
+	}
+	return []PromptBlock{
+		{
+			Module:  m.ID(),
+			Name:    "Skill Catalog",
+			Source:  filepath.Join(m.workdir, ".agents", "skills"),
+			Content: content,
+		},
+	}, nil
+}
+
+// ToolDefinitions 注册技能加载工具。
+func (m *skillModule) ToolDefinitions() []anthropic.ToolParam {
+	return skillToolDefinitions()
+}
+
+// ToolHandlers 绑定技能加载工具到当前 runtime。
+func (m *skillModule) ToolHandlers() map[string]ToolHandler {
+	if m.rt == nil {
+		return map[string]ToolHandler{}
+	}
+	return m.rt.skillToolHandlers()
+}
+
+// RuntimeSnapshot 暴露已发现技能的摘要信息。
+func (m *skillModule) RuntimeSnapshot() any {
+	if m.rt == nil {
+		return nil
+	}
+	skills := sortedSkills(m.rt.scanSkills())
+	names := make([]string, 0, len(skills))
+	for _, skill := range skills {
+		names = append(names, skill.Name)
+	}
+	return map[string]any{
+		"count": len(skills),
+		"names": names,
+	}
 }
 
 func (rt *agentRuntime) skillToolHandlers() map[string]ToolHandler {

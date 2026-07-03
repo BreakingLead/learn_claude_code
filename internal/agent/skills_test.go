@@ -21,7 +21,7 @@ func TestGetSystemPromptIncludesMemoryAndCachesByContext(t *testing.T) {
 	if !strings.Contains(prompt, "Use explicit runtime state.") {
 		t.Fatalf("prompt missing AGENTS.md project context: %s", prompt)
 	}
-	if !strings.Contains(prompt, "Memory sections:") || !strings.Contains(prompt, "Prefer explicit state.") {
+	if !strings.Contains(prompt, "Module context:") || !strings.Contains(prompt, "## Memory") || !strings.Contains(prompt, "Prefer explicit state.") {
 		t.Fatalf("prompt missing .agents/.memory/MEMORY.md section: %s", prompt)
 	}
 	if !strings.Contains(prompt, "**demo**: Demo skill") {

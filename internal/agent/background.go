@@ -48,6 +48,44 @@ type backgroundResult struct {
 	Error   string
 }
 
+type backgroundModule struct {
+	rt *agentRuntime
+}
+
+// ID 返回后台任务模块标识。
+func (m *backgroundModule) ID() string {
+	return "background"
+}
+
+// Init 后台任务 registry 由 runtime 显式创建，这里无需额外初始化。
+func (m *backgroundModule) Init(ctx ModuleContext) error {
+	return nil
+}
+
+// ToolDefinitions 注册后台任务工具。
+func (m *backgroundModule) ToolDefinitions() []anthropic.ToolParam {
+	return backgroundToolDefinitions()
+}
+
+// ToolHandlers 绑定后台任务工具到当前 runtime。
+func (m *backgroundModule) ToolHandlers() map[string]ToolHandler {
+	if m.rt == nil {
+		return map[string]ToolHandler{}
+	}
+	return m.rt.backgroundToolHandlers()
+}
+
+// RuntimeSnapshot 暴露后台任务摘要。
+func (m *backgroundModule) RuntimeSnapshot() any {
+	if m.rt == nil || m.rt.background == nil {
+		return nil
+	}
+	return map[string]any{
+		"defaultTimeout": m.rt.config.BackgroundTimeout.String(),
+		"jobs":           m.rt.background.list(),
+	}
+}
+
 func (rt *agentRuntime) backgroundToolHandlers() map[string]ToolHandler {
 	return map[string]ToolHandler{
 		"background_bash":   rt.runBackgroundBash,

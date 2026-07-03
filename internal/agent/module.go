@@ -31,6 +31,11 @@ type ToolContributor interface {
 	ToolHandlers() map[string]ToolHandler
 }
 
+// RuntimeSnapshotContributor 表示模块可以向 Debug tab 暴露可 JSON 化的运行时状态。
+type RuntimeSnapshotContributor interface {
+	RuntimeSnapshot() any
+}
+
 // TurnContributor 表示模块可以在模型调用前或工具调用后更新状态/注入消息。
 type TurnContributor interface {
 	BeforeModel(ctx context.Context, req TurnRequest) []anthropic.MessageParam
@@ -148,6 +153,28 @@ func (m *moduleManager) toolHandlers() map[string]ToolHandler {
 	return handlers
 }
 
+// moduleIDs 返回当前启用模块的稳定顺序。
+func (m *moduleManager) moduleIDs() []string {
+	ids := make([]string, 0, len(m.modules))
+	for _, module := range m.modules {
+		ids = append(ids, module.ID())
+	}
+	return ids
+}
+
+// runtimeSnapshots 收集模块自报状态，Debug tab 不再直接读取每个模块内部字段。
+func (m *moduleManager) runtimeSnapshots() map[string]any {
+	snapshots := map[string]any{}
+	for _, module := range m.modules {
+		contributor, ok := module.(RuntimeSnapshotContributor)
+		if !ok {
+			continue
+		}
+		snapshots[module.ID()] = contributor.RuntimeSnapshot()
+	}
+	return snapshots
+}
+
 // beforeModel 让模块在模型调用前注入内部消息。
 func (m *moduleManager) beforeModel(ctx context.Context, req TurnRequest) []anthropic.MessageParam {
 	var messages []anthropic.MessageParam
@@ -210,6 +237,14 @@ func (m *projectContextModule) PromptBlocks(ctx context.Context, req PromptReque
 	return readPromptFiles(candidates, 6000), nil
 }
 
+// RuntimeSnapshot 返回项目上下文模块读取的主要文件位置。
+func (m *projectContextModule) RuntimeSnapshot() any {
+	return map[string]any{
+		"workdir":   m.workdir,
+		"taskIndex": m.taskIndex,
+	}
+}
+
 type memoryContextModule struct {
 	memoryIndex string
 }
@@ -231,6 +266,13 @@ func (m *memoryContextModule) PromptBlocks(ctx context.Context, req PromptReques
 		{module: m.ID(), name: "Memory", path: m.memoryIndex},
 	}
 	return readPromptFiles(candidates, 6000), nil
+}
+
+// RuntimeSnapshot 返回记忆索引路径；具体记忆提取仍由 memory.go 负责。
+func (m *memoryContextModule) RuntimeSnapshot() any {
+	return map[string]any{
+		"memoryIndex": m.memoryIndex,
+	}
 }
 
 // readPromptFiles 读取一组候选文件，并按字符上限裁剪单块内容。

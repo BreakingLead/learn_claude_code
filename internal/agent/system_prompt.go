@@ -16,7 +16,6 @@ type promptContext struct {
 	Workdir      string
 	Model        string
 	ToolNames    []string
-	Skills       []SkillInfo
 	PromptBlocks []PromptBlock
 }
 
@@ -55,7 +54,6 @@ func (rt *agentRuntime) promptContext(toolNames []string) promptContext {
 		Workdir:      rt.config.Workdir,
 		Model:        rt.config.Model,
 		ToolNames:    sortedToolNames,
-		Skills:       sortedSkills(rt.scanSkills()),
 		PromptBlocks: rt.modules.promptBlocks(context.Background(), PromptRequest{ToolNames: sortedToolNames}),
 	}
 }
@@ -69,12 +67,6 @@ func (ctx promptContext) contextKey() string {
 	sb.WriteString("\n")
 	sb.WriteString(strings.Join(ctx.ToolNames, ","))
 	sb.WriteString("\n")
-	for _, skill := range ctx.Skills {
-		sb.WriteString(skill.Name)
-		sb.WriteString(":")
-		sb.WriteString(skill.Description)
-		sb.WriteString("\n")
-	}
 	for _, block := range ctx.PromptBlocks {
 		sb.WriteString(block.Module)
 		sb.WriteString(":")
@@ -96,40 +88,16 @@ func assembleSystemPrompt(ctx promptContext) string {
 		fmt.Sprintf("You are a coding agent working in `%s` directory.", ctx.Workdir),
 		fmt.Sprintf("Model: %s.", ctx.Model),
 		"Available tools: "+strings.Join(ctx.ToolNames, ", "),
-		"Skills available:\n"+listSkills(ctx.Skills),
 	)
 
-	projectBlocks := filterPromptBlocks(ctx.PromptBlocks, "project")
-	if len(projectBlocks) > 0 {
-		var project []string
-		for _, block := range projectBlocks {
-			project = append(project, renderPromptBlock(block))
+	if len(ctx.PromptBlocks) > 0 {
+		var blocks []string
+		for _, block := range ctx.PromptBlocks {
+			blocks = append(blocks, renderPromptBlock(block))
 		}
-		sections = append(sections, "Project context:\n"+strings.Join(project, "\n\n"))
+		sections = append(sections, "Module context:\n"+strings.Join(blocks, "\n\n"))
 	}
-
-	memoryBlocks := filterPromptBlocks(ctx.PromptBlocks, "memory")
-	if len(memoryBlocks) > 0 {
-		var memories []string
-		for _, block := range memoryBlocks {
-			memories = append(memories, renderPromptBlock(block))
-		}
-		sections = append(sections, "Memory sections:\n"+strings.Join(memories, "\n\n"))
-	}
-
-	sections = append(sections, "Use load_skill to get full skill details when needed.")
 	return strings.Join(sections, "\n\n")
-}
-
-// filterPromptBlocks 按模块 ID 过滤 prompt block。
-func filterPromptBlocks(blocks []PromptBlock, moduleID string) []PromptBlock {
-	var result []PromptBlock
-	for _, block := range blocks {
-		if block.Module == moduleID {
-			result = append(result, block)
-		}
-	}
-	return result
 }
 
 // renderPromptBlock 将统一 prompt block 渲染成 system prompt 片段。
@@ -147,6 +115,6 @@ func (rt *agentRuntime) getSystemPrompt(toolNames []string) string {
 	}
 	prompt := assembleSystemPrompt(ctx)
 	rt.promptCache = promptCache{contextKey: key, prompt: prompt}
-	rt.emitLine("[assembled] system prompt sections: base, tools, skills, blocks=%d", len(ctx.PromptBlocks))
+	rt.emitLine("[assembled] system prompt sections: base, tools, module_blocks=%d", len(ctx.PromptBlocks))
 	return prompt
 }
