@@ -1,4 +1,4 @@
-module go_agent
+module bee_agent
 
 go 1.26.4
 

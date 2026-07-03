@@ -2,7 +2,7 @@
 
 ## Project Structure & Module Organization
 
-This is a Go CLI/TUI coding-agent project. The executable entrypoint lives in `cmd/go-agent/main.go`. Internal implementation belongs under `internal/agent/`, which is intentionally private to this module.
+This is a Go CLI/TUI coding-agent project named Bee Agent. The executable entrypoint lives in `cmd/bee-agent/main.go`. Internal implementation belongs under `internal/agent/`, which is intentionally private to this module.
 
 Key files:
 
@@ -20,7 +20,7 @@ There are currently no dedicated test directories; place Go unit tests next to t
 Run locally:
 
 ```bash
-go run ./cmd/go-agent
+go run ./cmd/bee-agent
 ```
 
 Run all tests and vet checks triggered by `go test`:

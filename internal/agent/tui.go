@@ -682,7 +682,7 @@ func (m tuiModel) View() string {
 
 	header := lipgloss.JoinHorizontal(
 		lipgloss.Top,
-		m.styles.title.Render("go_agent"),
+		m.styles.title.Render("bee agent"),
 		" ",
 		m.styles.help.Render("[1 对话] [2 Debug]"),
 		" ",

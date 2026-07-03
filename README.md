@@ -5,7 +5,7 @@
 ## 架构概览
 
 ```
-cmd/go-agent/       CLI 入口
+cmd/bee-agent/      CLI 入口
 internal/agent/     agent 实现，只供本项目内部使用
   main.go           REPL 入口 + agentLoop 核心循环
   runtime.go        显式运行时状态、配置、hooks、UI 事件、prompt 缓存
@@ -29,7 +29,7 @@ internal/agent/     agent 实现，只供本项目内部使用
 
 ```bash
 # 确保 .env 中有 ANTHROPIC_API_KEY（和可选的 ANTHROPIC_BASE_URL）
-go run ./cmd/go-agent
+go run ./cmd/bee-agent
 ```
 
 ## TUI 快捷键

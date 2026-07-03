@@ -10,7 +10,7 @@ import (
 func TestGetSystemPromptIncludesMemoryAndCachesByContext(t *testing.T) {
 	workdir := t.TempDir()
 	writeFile(t, filepath.Join(workdir, "AGENTS.md"), "# Repository Guidelines\n\nUse explicit runtime state.")
-	writeFile(t, filepath.Join(workdir, "README.md"), "# Project\n\nRun with go run ./cmd/go-agent.")
+	writeFile(t, filepath.Join(workdir, "README.md"), "# Project\n\nRun with go run ./cmd/bee-agent.")
 	writeFile(t, filepath.Join(workdir, ".agents", ".memory", "MEMORY.md"), "# Memory Index\n\n- Prefer explicit state.")
 	writeFile(t, filepath.Join(workdir, ".agents", "skills", "demo", "SKILL.md"), "---\nname: demo\ndescription: Demo skill\n---\nDetails")
 
