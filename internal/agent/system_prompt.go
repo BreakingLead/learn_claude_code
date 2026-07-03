@@ -5,31 +5,19 @@ package agent
 // system prompt。技能的扫描和加载仍保留在 skills.go，这里只处理提示词上下文。
 
 import (
+	"context"
 	"crypto/sha256"
 	"fmt"
-	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 )
 
 type promptContext struct {
-	Workdir       string
-	Model         string
-	ToolNames     []string
-	Skills        []SkillInfo
-	ProjectBlocks []contextBlock
-	MemoryBlocks  []contextBlock
-}
-
-// a section in the system prompt
-// # $Name
-// Source : $Path
-// $Content
-type contextBlock struct {
-	Name    string
-	Path    string
-	Content string
+	Workdir      string
+	Model        string
+	ToolNames    []string
+	Skills       []SkillInfo
+	PromptBlocks []PromptBlock
 }
 
 // sortedSkills 把技能 map 转成按名称排序的切片，保证提示词稳定。
@@ -64,12 +52,11 @@ func (rt *agentRuntime) promptContext(toolNames []string) promptContext {
 	sortedToolNames := append([]string(nil), toolNames...)
 	sort.Strings(sortedToolNames)
 	return promptContext{
-		Workdir:       rt.config.Workdir,
-		Model:         rt.config.Model,
-		ToolNames:     sortedToolNames,
-		Skills:        sortedSkills(rt.scanSkills()),
-		ProjectBlocks: rt.loadProjectBlocks(),
-		MemoryBlocks:  rt.loadMemoryBlocks(),
+		Workdir:      rt.config.Workdir,
+		Model:        rt.config.Model,
+		ToolNames:    sortedToolNames,
+		Skills:       sortedSkills(rt.scanSkills()),
+		PromptBlocks: rt.modules.promptBlocks(context.Background(), PromptRequest{ToolNames: sortedToolNames}),
 	}
 }
 
@@ -88,76 +75,18 @@ func (ctx promptContext) contextKey() string {
 		sb.WriteString(skill.Description)
 		sb.WriteString("\n")
 	}
-	for _, block := range ctx.ProjectBlocks {
+	for _, block := range ctx.PromptBlocks {
+		sb.WriteString(block.Module)
+		sb.WriteString(":")
 		sb.WriteString(block.Name)
 		sb.WriteString(":")
-		sb.WriteString(block.Path)
-		sb.WriteString(":")
-		sb.WriteString(block.Content)
-		sb.WriteString("\n")
-	}
-	for _, block := range ctx.MemoryBlocks {
-		sb.WriteString(block.Name)
-		sb.WriteString(":")
-		sb.WriteString(block.Path)
+		sb.WriteString(block.Source)
 		sb.WriteString(":")
 		sb.WriteString(block.Content)
 		sb.WriteString("\n")
 	}
 	sum := sha256.Sum256([]byte(sb.String()))
 	return fmt.Sprintf("%x", sum)
-}
-
-// loadProjectBlocks 读取会影响系统提示词的项目级上下文文件。
-func (rt *agentRuntime) loadProjectBlocks() []contextBlock {
-	candidates := []struct {
-		name string
-		path string
-	}{
-		{name: "Repository Guidelines", path: filepath.Join(rt.config.Workdir, "AGENTS.md")},
-		{name: "Project README", path: filepath.Join(rt.config.Workdir, "README.md")},
-		{name: "Task Index", path: rt.config.TaskIndex},
-	}
-
-	return rt.readContextBlocks(candidates, 6000)
-}
-
-// loadMemoryBlocks 读取会注入系统提示词的持久记忆索引。
-func (rt *agentRuntime) loadMemoryBlocks() []contextBlock {
-	candidates := []struct {
-		name string
-		path string
-	}{
-		{name: "Memory", path: rt.config.MemoryIndex},
-	}
-	return rt.readContextBlocks(candidates, 6000)
-}
-
-// readContextBlocks 读取一组候选上下文文件，并按字符上限裁剪单块内容。
-func (rt *agentRuntime) readContextBlocks(candidates []struct {
-	name string
-	path string
-}, limit int) []contextBlock {
-	var blocks []contextBlock
-	for _, candidate := range candidates {
-		raw, err := os.ReadFile(candidate.path)
-		if err != nil {
-			continue
-		}
-		content := strings.TrimSpace(string(raw))
-		if content == "" {
-			continue
-		}
-		if limit > 0 && len(content) > limit {
-			content = content[:limit] + "\n[truncated]"
-		}
-		blocks = append(blocks, contextBlock{
-			Name:    candidate.name,
-			Path:    candidate.path,
-			Content: content,
-		})
-	}
-	return blocks
 }
 
 // assembleSystemPrompt 只根据 promptContext 组装文本，便于缓存和测试。
@@ -170,24 +99,42 @@ func assembleSystemPrompt(ctx promptContext) string {
 		"Skills available:\n"+listSkills(ctx.Skills),
 	)
 
-	if len(ctx.ProjectBlocks) > 0 {
+	projectBlocks := filterPromptBlocks(ctx.PromptBlocks, "project")
+	if len(projectBlocks) > 0 {
 		var project []string
-		for _, block := range ctx.ProjectBlocks {
-			project = append(project, fmt.Sprintf("## %s\nSource: %s\n%s", block.Name, block.Path, block.Content))
+		for _, block := range projectBlocks {
+			project = append(project, renderPromptBlock(block))
 		}
 		sections = append(sections, "Project context:\n"+strings.Join(project, "\n\n"))
 	}
 
-	if len(ctx.MemoryBlocks) > 0 {
+	memoryBlocks := filterPromptBlocks(ctx.PromptBlocks, "memory")
+	if len(memoryBlocks) > 0 {
 		var memories []string
-		for _, block := range ctx.MemoryBlocks {
-			memories = append(memories, fmt.Sprintf("## %s\nSource: %s\n%s", block.Name, block.Path, block.Content))
+		for _, block := range memoryBlocks {
+			memories = append(memories, renderPromptBlock(block))
 		}
 		sections = append(sections, "Memory sections:\n"+strings.Join(memories, "\n\n"))
 	}
 
 	sections = append(sections, "Use load_skill to get full skill details when needed.")
 	return strings.Join(sections, "\n\n")
+}
+
+// filterPromptBlocks 按模块 ID 过滤 prompt block。
+func filterPromptBlocks(blocks []PromptBlock, moduleID string) []PromptBlock {
+	var result []PromptBlock
+	for _, block := range blocks {
+		if block.Module == moduleID {
+			result = append(result, block)
+		}
+	}
+	return result
+}
+
+// renderPromptBlock 将统一 prompt block 渲染成 system prompt 片段。
+func renderPromptBlock(block PromptBlock) string {
+	return fmt.Sprintf("## %s\nSource: %s\n%s", block.Name, block.Source, block.Content)
 }
 
 // getSystemPrompt 使用稳定 context key 缓存 system prompt，避免每轮重复组装。
@@ -200,6 +147,6 @@ func (rt *agentRuntime) getSystemPrompt(toolNames []string) string {
 	}
 	prompt := assembleSystemPrompt(ctx)
 	rt.promptCache = promptCache{contextKey: key, prompt: prompt}
-	rt.emitLine("[assembled] system prompt sections: base, tools, skills, project=%d, memory=%d", len(ctx.ProjectBlocks), len(ctx.MemoryBlocks))
+	rt.emitLine("[assembled] system prompt sections: base, tools, skills, blocks=%d", len(ctx.PromptBlocks))
 	return prompt
 }

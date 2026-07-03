@@ -9,6 +9,7 @@ cmd/go-agent/       CLI 入口
 internal/agent/     agent 实现，只供本项目内部使用
   main.go           REPL 入口 + agentLoop 核心循环
   runtime.go        显式运行时状态、配置、hooks、UI 事件、prompt 缓存
+  module.go         内部模块共通 API、moduleManager、prompt block 收集
   constants.go      环境变量读取、终端颜色辅助
   tools.go          8 个工具的定义（JSON Schema）与处理函数
   permission.go     三层权限门控：拒绝列表 → 规则检查 → 用户确认

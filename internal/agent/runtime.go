@@ -24,6 +24,7 @@ type agentRuntime struct {
 	hooks           map[HookEvent][]HookCallback
 	events          chan<- uiEvent
 	approvals       <-chan bool
+	modules         *moduleManager
 	background      *backgroundRegistry
 	currentTodos    []Todo
 	roundsSinceTodo int
@@ -96,6 +97,17 @@ func newAgentRuntime(config agentConfig, events chan<- uiEvent, approvals <-chan
 	}
 	rt.background = newBackgroundRegistry(rt.emitLine)
 	rt.recovery = newRecoveryState(config)
+	rt.modules = newModuleManager(
+		&projectContextModule{},
+		&memoryContextModule{},
+	)
+	if err := rt.modules.init(ModuleContext{
+		Workdir: config.Workdir,
+		Config:  config,
+		Log:     rt.emitLine,
+	}); err != nil {
+		rt.emitLine("[module] %v", err)
+	}
 	rt.initHooks()
 	return rt
 }
