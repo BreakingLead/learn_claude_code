@@ -49,6 +49,7 @@ type agentConfig struct {
 	MaxTokenContinuations int
 	RetryBaseDelay        time.Duration
 	RetryMaxDelay         time.Duration
+	BackgroundTimeout     time.Duration
 }
 
 type promptCache struct {
@@ -79,6 +80,7 @@ func newAgentConfig() (agentConfig, error) {
 		MaxTokenContinuations: 1,
 		RetryBaseDelay:        500 * time.Millisecond,
 		RetryMaxDelay:         8 * time.Second,
+		BackgroundTimeout:     10 * time.Minute,
 	}, nil
 }
 

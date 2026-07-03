@@ -328,10 +328,11 @@ func buildBaseToolParams() []anthropic.ToolParam {
 		},
 		{
 			Name:        "background_bash",
-			Description: anthropic.String("Run a shell command in the background and return a job id."),
+			Description: anthropic.String("Run a shell command in the background and return a job id. Uses a default timeout unless timeout_seconds is provided."),
 			InputSchema: anthropic.ToolInputSchemaParam{
 				Properties: map[string]any{
-					"command": map[string]any{"type": "string"},
+					"command":         map[string]any{"type": "string"},
+					"timeout_seconds": map[string]any{"type": "integer", "description": "Optional positive timeout override in seconds."},
 				},
 				Required: []string{"command"},
 			},

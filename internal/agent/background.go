@@ -11,6 +11,7 @@ package agent
 //   - 注入消息由 agent loop 显式调用 injectBackgroundNotifications 完成。
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os/exec"
@@ -35,6 +36,7 @@ type backgroundJob struct {
 	Status    string
 	Output    string
 	Error     string
+	Timeout   time.Duration
 	StartedAt time.Time
 	EndedAt   time.Time
 }
@@ -57,7 +59,8 @@ func newBackgroundRegistry(emit func(format string, args ...any)) *backgroundReg
 // runBackgroundBash 启动后台 bash 命令并立即返回 job id。
 func (rt *agentRuntime) runBackgroundBash(raw json.RawMessage) string {
 	var input struct {
-		Command string `json:"command"`
+		Command        string `json:"command"`
+		TimeoutSeconds *int   `json:"timeout_seconds"`
 	}
 	if err := json.Unmarshal(raw, &input); err != nil {
 		return fmt.Sprintf("Error: %v", err)
@@ -66,8 +69,12 @@ func (rt *agentRuntime) runBackgroundBash(raw json.RawMessage) string {
 	if command == "" {
 		return "Error: command is required"
 	}
-	job := rt.background.start(command, rt.config.Workdir)
-	return fmt.Sprintf("Started background job %s: %s", job.ID, job.Command)
+	timeout, err := backgroundTimeout(rt.config.BackgroundTimeout, input.TimeoutSeconds)
+	if err != nil {
+		return fmt.Sprintf("Error: %v", err)
+	}
+	job := rt.background.start(command, rt.config.Workdir, timeout)
+	return fmt.Sprintf("Started background job %s with timeout %s: %s", job.ID, job.Timeout, job.Command)
 }
 
 // runBackgroundStatus 返回单个后台 job 的当前状态和输出预览。
@@ -116,7 +123,7 @@ func (rt *agentRuntime) injectBackgroundNotifications(messages *[]anthropic.Mess
 }
 
 // start 创建 job 并在 goroutine 中运行 shell 命令。
-func (r *backgroundRegistry) start(command string, workdir string) backgroundJob {
+func (r *backgroundRegistry) start(command string, workdir string, timeout time.Duration) backgroundJob {
 	r.mu.Lock()
 	r.nextID++
 	id := fmt.Sprintf("bg-%d", r.nextID)
@@ -124,6 +131,7 @@ func (r *backgroundRegistry) start(command string, workdir string) backgroundJob
 		ID:        id,
 		Command:   command,
 		Status:    "running",
+		Timeout:   timeout,
 		StartedAt: time.Now(),
 	}
 	r.jobs[id] = job
@@ -133,13 +141,16 @@ func (r *backgroundRegistry) start(command string, workdir string) backgroundJob
 		r.emit("[background] started %s", id)
 	}
 
-	go r.run(job, workdir)
+	go r.run(job, workdir, timeout)
 	return *job
 }
 
 // run 执行 shell 命令，记录输出，并把完成事件放入队列。
-func (r *backgroundRegistry) run(job *backgroundJob, workdir string) {
-	cmd := exec.Command("bash", "-c", job.Command)
+func (r *backgroundRegistry) run(job *backgroundJob, workdir string, timeout time.Duration) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "bash", "-c", job.Command)
 	cmd.Dir = workdir
 	out, err := cmd.CombinedOutput()
 
@@ -147,7 +158,10 @@ func (r *backgroundRegistry) run(job *backgroundJob, workdir string) {
 	defer r.mu.Unlock()
 	job.EndedAt = time.Now()
 	job.Output = strings.TrimSpace(string(out))
-	if err != nil {
+	if ctx.Err() == context.DeadlineExceeded {
+		job.Status = "timeout"
+		job.Error = fmt.Sprintf("background job timed out after %s", timeout)
+	} else if err != nil {
 		job.Status = "failed"
 		job.Error = err.Error()
 	} else {
@@ -162,6 +176,19 @@ func (r *backgroundRegistry) run(job *backgroundJob, workdir string) {
 	if r.emit != nil {
 		r.emit("[background] %s %s", job.ID, job.Status)
 	}
+}
+
+func backgroundTimeout(defaultTimeout time.Duration, overrideSeconds *int) (time.Duration, error) {
+	if defaultTimeout <= 0 {
+		defaultTimeout = 10 * time.Minute
+	}
+	if overrideSeconds == nil {
+		return defaultTimeout, nil
+	}
+	if *overrideSeconds <= 0 {
+		return 0, fmt.Errorf("timeout_seconds must be positive")
+	}
+	return time.Duration(*overrideSeconds) * time.Second, nil
 }
 
 // status 返回指定 job 的快照。
@@ -197,9 +224,10 @@ func (r *backgroundRegistry) drainCompleted() []backgroundResult {
 
 // formatBackgroundJob 格式化单个后台 job 的状态和输出。
 func formatBackgroundJob(job backgroundJob) string {
-	return fmt.Sprintf("Job: %s\nStatus: %s\nCommand: %s\nError: %s\nOutput:\n%s",
+	return fmt.Sprintf("Job: %s\nStatus: %s\nTimeout: %s\nCommand: %s\nError: %s\nOutput:\n%s",
 		job.ID,
 		job.Status,
+		job.Timeout,
 		job.Command,
 		job.Error,
 		truncate(job.Output, 2000),
