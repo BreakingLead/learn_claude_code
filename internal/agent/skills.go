@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/anthropics/anthropic-sdk-go"
 )
 
 // SkillInfo 保存扫描到的技能信息
@@ -14,6 +16,27 @@ type SkillInfo struct {
 	Name        string
 	Description string
 	Content     string // SKILL.md 原始内容
+}
+
+func (rt *agentRuntime) skillToolHandlers() map[string]ToolHandler {
+	return map[string]ToolHandler{
+		"load_skill": rt.loadSkill,
+	}
+}
+
+func skillToolDefinitions() []anthropic.ToolParam {
+	return []anthropic.ToolParam{
+		{
+			Name:        "load_skill",
+			Description: anthropic.String("Load the full instructions for an available skill by name."),
+			InputSchema: anthropic.ToolInputSchemaParam{
+				Properties: map[string]any{
+					"name": map[string]any{"type": "string"},
+				},
+				Required: []string{"name"},
+			},
+		},
+	}
 }
 
 // scanSkills 扫描 .agents/skills/ 目录，发现所有可用技能。

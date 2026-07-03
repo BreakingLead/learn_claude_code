@@ -20,6 +20,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/anthropics/anthropic-sdk-go"
 )
 
 type taskRecord struct {
@@ -30,6 +32,74 @@ type taskRecord struct {
 	Owner       string   `json:"owner"`
 	BlockedBy   []string `json:"blockedBy"`
 	Path        string   `json:"-"`
+}
+
+func (rt *agentRuntime) taskSystemToolHandlers() map[string]ToolHandler {
+	return map[string]ToolHandler{
+		"task_create":   rt.runTaskCreate,
+		"task_list":     rt.runTaskList,
+		"task_get":      rt.runTaskGet,
+		"task_claim":    rt.runTaskClaim,
+		"task_complete": rt.runTaskComplete,
+	}
+}
+
+func taskSystemToolDefinitions() []anthropic.ToolParam {
+	return []anthropic.ToolParam{
+		{
+			Name:        "task_create",
+			Description: anthropic.String("Create a persistent JSON task in .agents/.tasks/. Use blockedBy for dependency IDs."),
+			InputSchema: anthropic.ToolInputSchemaParam{
+				Properties: map[string]any{
+					"subject":     map[string]any{"type": "string"},
+					"description": map[string]any{"type": "string"},
+					"blockedBy": map[string]any{
+						"type":  "array",
+						"items": map[string]any{"type": "string"},
+					},
+				},
+				Required: []string{"subject"},
+			},
+		},
+		{
+			Name:        "task_list",
+			Description: anthropic.String("List persistent tasks from .agents/.tasks/TASKS.md."),
+			InputSchema: anthropic.ToolInputSchemaParam{
+				Properties: map[string]any{},
+			},
+		},
+		{
+			Name:        "task_get",
+			Description: anthropic.String("Get full task JSON by id."),
+			InputSchema: anthropic.ToolInputSchemaParam{
+				Properties: map[string]any{
+					"id": map[string]any{"type": "string"},
+				},
+				Required: []string{"id"},
+			},
+		},
+		{
+			Name:        "task_claim",
+			Description: anthropic.String("Claim a pending task when all blockedBy dependencies are completed."),
+			InputSchema: anthropic.ToolInputSchemaParam{
+				Properties: map[string]any{
+					"id":    map[string]any{"type": "string"},
+					"owner": map[string]any{"type": "string"},
+				},
+				Required: []string{"id"},
+			},
+		},
+		{
+			Name:        "task_complete",
+			Description: anthropic.String("Mark a task completed and report newly unblocked pending tasks."),
+			InputSchema: anthropic.ToolInputSchemaParam{
+				Properties: map[string]any{
+					"id": map[string]any{"type": "string"},
+				},
+				Required: []string{"id"},
+			},
+		},
+	}
 }
 
 // runTaskCreate 创建一条持久任务，并写入 .agents/.tasks/{id}.json。

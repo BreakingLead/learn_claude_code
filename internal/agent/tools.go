@@ -16,32 +16,32 @@ type ToolHandler func(input json.RawMessage) string
 
 // toolHandlers 返回当前运行时绑定的工具处理函数。
 func (rt *agentRuntime) toolHandlers() map[string]ToolHandler {
-	handlers := map[string]ToolHandler{
-		"bash":              rt.runBash,
-		"read_file":         rt.runRead,
-		"write_file":        rt.runWrite,
-		"edit_file":         rt.runEdit,
-		"glob":              rt.runGlob,
-		"task":              rt.spawnSubagent,
-		"load_skill":        rt.loadSkill,
-		"task_create":       rt.runTaskCreate,
-		"task_list":         rt.runTaskList,
-		"task_get":          rt.runTaskGet,
-		"task_claim":        rt.runTaskClaim,
-		"task_complete":     rt.runTaskComplete,
-		"background_bash":   rt.runBackgroundBash,
-		"background_status": rt.runBackgroundStatus,
-		"background_list":   rt.runBackgroundList,
-		"schedule_cron":     rt.runScheduleCron,
-		"list_crons":        rt.runListCrons,
-		"cancel_cron":       rt.runCancelCron,
-	}
+	handlers := rt.coreToolHandlers()
+	mergeToolHandlers(handlers, rt.subagentToolHandlers())
+	mergeToolHandlers(handlers, rt.skillToolHandlers())
+	mergeToolHandlers(handlers, rt.taskSystemToolHandlers())
+	mergeToolHandlers(handlers, rt.backgroundToolHandlers())
+	mergeToolHandlers(handlers, rt.cronToolHandlers())
 	if rt.modules != nil {
-		for name, handler := range rt.modules.toolHandlers() {
-			handlers[name] = handler
-		}
+		mergeToolHandlers(handlers, rt.modules.toolHandlers())
 	}
 	return handlers
+}
+
+func (rt *agentRuntime) coreToolHandlers() map[string]ToolHandler {
+	return map[string]ToolHandler{
+		"bash":       rt.runBash,
+		"read_file":  rt.runRead,
+		"write_file": rt.runWrite,
+		"edit_file":  rt.runEdit,
+		"glob":       rt.runGlob,
+	}
+}
+
+func mergeToolHandlers(dst map[string]ToolHandler, src map[string]ToolHandler) {
+	for name, handler := range src {
+		dst[name] = handler
+	}
 }
 
 // ── 工具实现 ──────────────────────────────────────────
@@ -189,7 +189,12 @@ func (rt *agentRuntime) runGlob(raw json.RawMessage) string {
 // ── 工具 Schema 定义 ──────────────────────────────────
 
 func (rt *agentRuntime) buildTools() []anthropic.ToolUnionParam {
-	toolParams := buildBaseToolParams()
+	toolParams := buildCoreToolParams()
+	toolParams = append(toolParams, subagentToolDefinitions()...)
+	toolParams = append(toolParams, skillToolDefinitions()...)
+	toolParams = append(toolParams, taskSystemToolDefinitions()...)
+	toolParams = append(toolParams, backgroundToolDefinitions()...)
+	toolParams = append(toolParams, cronToolDefinitions()...)
 	if rt != nil && rt.modules != nil {
 		toolParams = append(toolParams, rt.modules.toolDefinitions()...)
 	}
@@ -200,8 +205,8 @@ func (rt *agentRuntime) buildTools() []anthropic.ToolUnionParam {
 	return tools
 }
 
-func buildBaseToolParams() []anthropic.ToolParam {
-	toolParams := []anthropic.ToolParam{
+func buildCoreToolParams() []anthropic.ToolParam {
+	return []anthropic.ToolParam{
 		{
 			Name:        "bash",
 			Description: anthropic.String("Run a shell command."),
@@ -256,140 +261,7 @@ func buildBaseToolParams() []anthropic.ToolParam {
 				Required: []string{"pattern"},
 			},
 		},
-		{
-			Name:        "task",
-			Description: anthropic.String("Launch a subagent to handle a complex subtask. Returns only the final conclusion."),
-			InputSchema: anthropic.ToolInputSchemaParam{
-				Properties: map[string]any{
-					"description": map[string]any{"type": "string"},
-				},
-				Required: []string{"description"},
-			},
-		},
-		{
-			Name:        "load_skill",
-			Description: anthropic.String("Load the full instructions for an available skill by name."),
-			InputSchema: anthropic.ToolInputSchemaParam{
-				Properties: map[string]any{
-					"name": map[string]any{"type": "string"},
-				},
-				Required: []string{"name"},
-			},
-		},
-		{
-			Name:        "task_create",
-			Description: anthropic.String("Create a persistent JSON task in .agents/.tasks/. Use blockedBy for dependency IDs."),
-			InputSchema: anthropic.ToolInputSchemaParam{
-				Properties: map[string]any{
-					"subject":     map[string]any{"type": "string"},
-					"description": map[string]any{"type": "string"},
-					"blockedBy": map[string]any{
-						"type":  "array",
-						"items": map[string]any{"type": "string"},
-					},
-				},
-				Required: []string{"subject"},
-			},
-		},
-		{
-			Name:        "task_list",
-			Description: anthropic.String("List persistent tasks from .agents/.tasks/TASKS.md."),
-			InputSchema: anthropic.ToolInputSchemaParam{
-				Properties: map[string]any{},
-			},
-		},
-		{
-			Name:        "task_get",
-			Description: anthropic.String("Get full task JSON by id."),
-			InputSchema: anthropic.ToolInputSchemaParam{
-				Properties: map[string]any{
-					"id": map[string]any{"type": "string"},
-				},
-				Required: []string{"id"},
-			},
-		},
-		{
-			Name:        "task_claim",
-			Description: anthropic.String("Claim a pending task when all blockedBy dependencies are completed."),
-			InputSchema: anthropic.ToolInputSchemaParam{
-				Properties: map[string]any{
-					"id":    map[string]any{"type": "string"},
-					"owner": map[string]any{"type": "string"},
-				},
-				Required: []string{"id"},
-			},
-		},
-		{
-			Name:        "task_complete",
-			Description: anthropic.String("Mark a task completed and report newly unblocked pending tasks."),
-			InputSchema: anthropic.ToolInputSchemaParam{
-				Properties: map[string]any{
-					"id": map[string]any{"type": "string"},
-				},
-				Required: []string{"id"},
-			},
-		},
-		{
-			Name:        "background_bash",
-			Description: anthropic.String("Run a shell command in the background and return a job id. Uses a default timeout unless timeout_seconds is provided."),
-			InputSchema: anthropic.ToolInputSchemaParam{
-				Properties: map[string]any{
-					"command":         map[string]any{"type": "string"},
-					"timeout_seconds": map[string]any{"type": "integer", "description": "Optional positive timeout override in seconds."},
-				},
-				Required: []string{"command"},
-			},
-		},
-		{
-			Name:        "background_status",
-			Description: anthropic.String("Inspect a background job by id."),
-			InputSchema: anthropic.ToolInputSchemaParam{
-				Properties: map[string]any{
-					"id": map[string]any{"type": "string"},
-				},
-				Required: []string{"id"},
-			},
-		},
-		{
-			Name:        "background_list",
-			Description: anthropic.String("List background shell jobs."),
-			InputSchema: anthropic.ToolInputSchemaParam{
-				Properties: map[string]any{},
-			},
-		},
-		{
-			Name:        "schedule_cron",
-			Description: anthropic.String("Schedule a prompt to be delivered automatically using a 5-field cron expression."),
-			InputSchema: anthropic.ToolInputSchemaParam{
-				Properties: map[string]any{
-					"cron":      map[string]any{"type": "string", "description": "Five-field cron expression, e.g. */5 * * * * or 0 9 * * 1-5."},
-					"prompt":    map[string]any{"type": "string"},
-					"recurring": map[string]any{"type": "boolean", "description": "Defaults to true."},
-					"durable":   map[string]any{"type": "boolean", "description": "Defaults to true; durable jobs persist to .scheduled_tasks.json."},
-				},
-				Required: []string{"cron", "prompt"},
-			},
-		},
-		{
-			Name:        "list_crons",
-			Description: anthropic.String("List scheduled cron jobs."),
-			InputSchema: anthropic.ToolInputSchemaParam{
-				Properties: map[string]any{},
-			},
-		},
-		{
-			Name:        "cancel_cron",
-			Description: anthropic.String("Cancel a scheduled cron job by id."),
-			InputSchema: anthropic.ToolInputSchemaParam{
-				Properties: map[string]any{
-					"id": map[string]any{"type": "string"},
-				},
-				Required: []string{"id"},
-			},
-		},
 	}
-
-	return toolParams
 }
 
 func toolNames(tools []anthropic.ToolUnionParam) []string {

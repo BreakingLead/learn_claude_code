@@ -37,6 +37,49 @@ type cronScheduler struct {
 	notify    func(count int)
 }
 
+func (rt *agentRuntime) cronToolHandlers() map[string]ToolHandler {
+	return map[string]ToolHandler{
+		"schedule_cron": rt.runScheduleCron,
+		"list_crons":    rt.runListCrons,
+		"cancel_cron":   rt.runCancelCron,
+	}
+}
+
+func cronToolDefinitions() []anthropic.ToolParam {
+	return []anthropic.ToolParam{
+		{
+			Name:        "schedule_cron",
+			Description: anthropic.String("Schedule a prompt to be delivered automatically using a 5-field cron expression."),
+			InputSchema: anthropic.ToolInputSchemaParam{
+				Properties: map[string]any{
+					"cron":      map[string]any{"type": "string", "description": "Five-field cron expression, e.g. */5 * * * * or 0 9 * * 1-5."},
+					"prompt":    map[string]any{"type": "string"},
+					"recurring": map[string]any{"type": "boolean", "description": "Defaults to true."},
+					"durable":   map[string]any{"type": "boolean", "description": "Defaults to true; durable jobs persist to .scheduled_tasks.json."},
+				},
+				Required: []string{"cron", "prompt"},
+			},
+		},
+		{
+			Name:        "list_crons",
+			Description: anthropic.String("List scheduled cron jobs."),
+			InputSchema: anthropic.ToolInputSchemaParam{
+				Properties: map[string]any{},
+			},
+		},
+		{
+			Name:        "cancel_cron",
+			Description: anthropic.String("Cancel a scheduled cron job by id."),
+			InputSchema: anthropic.ToolInputSchemaParam{
+				Properties: map[string]any{
+					"id": map[string]any{"type": "string"},
+				},
+				Required: []string{"id"},
+			},
+		},
+	}
+}
+
 func newCronScheduler(path string, emit func(format string, args ...any), notify func(count int)) *cronScheduler {
 	return &cronScheduler{
 		jobs:      map[string]cronJob{},

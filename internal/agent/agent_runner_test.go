@@ -29,6 +29,35 @@ func TestMainAgentToolsIncludeTodoModuleTool(t *testing.T) {
 	}
 }
 
+func TestMainAgentToolsIncludeFileLocalDefinitions(t *testing.T) {
+	rt := newAgentRuntime(testConfig(t.TempDir()), nil, nil)
+	names := toolNames(rt.buildTools())
+	handlers := rt.toolHandlers()
+
+	for _, want := range []string{
+		"task",
+		"load_skill",
+		"task_create",
+		"task_list",
+		"task_get",
+		"task_claim",
+		"task_complete",
+		"background_bash",
+		"background_status",
+		"background_list",
+		"schedule_cron",
+		"list_crons",
+		"cancel_cron",
+	} {
+		if !hasString(names, want) {
+			t.Fatalf("main agent tools missing %q in %v", want, names)
+		}
+		if handlers[want] == nil {
+			t.Fatalf("main agent handlers missing %q", want)
+		}
+	}
+}
+
 func TestFilterToolHandlersKeepsOnlyRequestedNames(t *testing.T) {
 	rt := newAgentRuntime(testConfig(t.TempDir()), nil, nil)
 	handlers := filterToolHandlers(rt.toolHandlers(), []string{"read_file", "glob"})

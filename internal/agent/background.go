@@ -48,6 +48,47 @@ type backgroundResult struct {
 	Error   string
 }
 
+func (rt *agentRuntime) backgroundToolHandlers() map[string]ToolHandler {
+	return map[string]ToolHandler{
+		"background_bash":   rt.runBackgroundBash,
+		"background_status": rt.runBackgroundStatus,
+		"background_list":   rt.runBackgroundList,
+	}
+}
+
+func backgroundToolDefinitions() []anthropic.ToolParam {
+	return []anthropic.ToolParam{
+		{
+			Name:        "background_bash",
+			Description: anthropic.String("Run a shell command in the background and return a job id. Uses a default timeout unless timeout_seconds is provided."),
+			InputSchema: anthropic.ToolInputSchemaParam{
+				Properties: map[string]any{
+					"command":         map[string]any{"type": "string"},
+					"timeout_seconds": map[string]any{"type": "integer", "description": "Optional positive timeout override in seconds."},
+				},
+				Required: []string{"command"},
+			},
+		},
+		{
+			Name:        "background_status",
+			Description: anthropic.String("Inspect a background job by id."),
+			InputSchema: anthropic.ToolInputSchemaParam{
+				Properties: map[string]any{
+					"id": map[string]any{"type": "string"},
+				},
+				Required: []string{"id"},
+			},
+		},
+		{
+			Name:        "background_list",
+			Description: anthropic.String("List background shell jobs."),
+			InputSchema: anthropic.ToolInputSchemaParam{
+				Properties: map[string]any{},
+			},
+		},
+	}
+}
+
 // newBackgroundRegistry 创建后台任务注册表，并注入日志出口。
 func newBackgroundRegistry(emit func(format string, args ...any)) *backgroundRegistry {
 	return &backgroundRegistry{

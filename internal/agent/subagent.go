@@ -12,6 +12,27 @@ import (
 	"github.com/joho/godotenv"
 )
 
+func (rt *agentRuntime) subagentToolHandlers() map[string]ToolHandler {
+	return map[string]ToolHandler{
+		"task": rt.spawnSubagent,
+	}
+}
+
+func subagentToolDefinitions() []anthropic.ToolParam {
+	return []anthropic.ToolParam{
+		{
+			Name:        "task",
+			Description: anthropic.String("Launch a subagent to handle a complex subtask. Returns only the final conclusion."),
+			InputSchema: anthropic.ToolInputSchemaParam{
+				Properties: map[string]any{
+					"description": map[string]any{"type": "string"},
+				},
+				Required: []string{"description"},
+			},
+		},
+	}
+}
+
 // spawnSubagent 启动一个子 agent，独立对话历史，仅返回最终摘要
 func (rt *agentRuntime) spawnSubagent(raw json.RawMessage) string {
 	var input struct {
