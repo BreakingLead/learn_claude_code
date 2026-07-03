@@ -18,34 +18,43 @@ type agentDoneMsg struct {
 
 type tuiEventMsg uiEvent
 
+const (
+	paneGapWidth     = 1
+	minChatPaneWidth = 20
+	minLogPaneWidth  = 20
+)
+
 type tuiModel struct {
-	ctx       context.Context
-	client    anthropic.Client
-	rt        *agentRuntime
-	styles    tuiStyles
-	history   []anthropic.MessageParam
-	chatView  viewport.Model
-	logView   viewport.Model
-	input     textarea.Model
-	events    chan uiEvent
-	approvals chan bool
-	width     int
-	height    int
-	running   bool
-	approving bool
-	status    string
-	logs      []string
+	ctx             context.Context
+	client          anthropic.Client
+	rt              *agentRuntime
+	styles          tuiStyles
+	history         []anthropic.MessageParam
+	chatView        viewport.Model
+	logView         viewport.Model
+	input           textarea.Model
+	events          chan uiEvent
+	approvals       chan bool
+	width           int
+	height          int
+	logPaneWidth    int
+	draggingDivider bool
+	running         bool
+	approving       bool
+	status          string
+	logs            []string
 }
 
 type tuiStyles struct {
-	title lipgloss.Style
-	help  lipgloss.Style
-	user  lipgloss.Style
-	ai    lipgloss.Style
-	log   lipgloss.Style
-	warn  lipgloss.Style
-	pane  lipgloss.Style
-	box   lipgloss.Style
+	title   lipgloss.Style
+	help    lipgloss.Style
+	user    lipgloss.Style
+	ai      lipgloss.Style
+	log     lipgloss.Style
+	warn    lipgloss.Style
+	pane    lipgloss.Style
+	divider lipgloss.Style
+	box     lipgloss.Style
 }
 
 func newTUIStyles() tuiStyles {
@@ -61,7 +70,9 @@ func newTUIStyles() tuiStyles {
 		log:  lipgloss.NewStyle().Foreground(lipgloss.Color("244")),
 		warn: lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("214")),
 		pane: lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("245")),
-		box:  lipgloss.NewStyle().Border(lipgloss.NormalBorder()).BorderForeground(lipgloss.Color("238")),
+		divider: lipgloss.NewStyle().
+			Foreground(lipgloss.Color("240")),
+		box: lipgloss.NewStyle().Border(lipgloss.NormalBorder()).BorderForeground(lipgloss.Color("238")),
 	}
 }
 
@@ -75,7 +86,7 @@ func runTUI(ctx context.Context, client anthropic.Client) {
 	}
 	rt := newAgentRuntime(config, events, approvals)
 
-	p := tea.NewProgram(newTUIModel(ctx, client, rt, events, approvals), tea.WithAltScreen())
+	p := tea.NewProgram(newTUIModel(ctx, client, rt, events, approvals), tea.WithAltScreen(), tea.WithMouseCellMotion())
 	if _, err := p.Run(); err != nil {
 		fmt.Println(colorRed("TUI error: " + err.Error()))
 	}
@@ -95,16 +106,17 @@ func newTUIModel(ctx context.Context, client anthropic.Client, rt *agentRuntime,
 	ti.SetHeight(4)
 
 	return tuiModel{
-		ctx:       ctx,
-		client:    client,
-		rt:        rt,
-		styles:    newTUIStyles(),
-		chatView:  chatView,
-		logView:   logView,
-		input:     ti,
-		events:    events,
-		approvals: approvals,
-		status:    "ready",
+		ctx:          ctx,
+		client:       client,
+		rt:           rt,
+		styles:       newTUIStyles(),
+		chatView:     chatView,
+		logView:      logView,
+		input:        ti,
+		events:       events,
+		approvals:    approvals,
+		logPaneWidth: 34,
+		status:       "ready",
 	}
 }
 
@@ -135,6 +147,11 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		m.resize()
+
+	case tea.MouseMsg:
+		if m.handleMouse(msg) {
+			return m, nil
+		}
 
 	case tea.KeyMsg:
 		switch {
@@ -222,33 +239,126 @@ func (m *tuiModel) resize() {
 	if viewportHeight < 5 {
 		viewportHeight = 5
 	}
-	logWidth := 34
-	if m.width < 100 {
-		logWidth = m.width / 3
+	if m.logPaneWidth <= 0 {
+		m.logPaneWidth = defaultLogPaneWidth(m.width)
 	}
-	if logWidth < 24 {
-		logWidth = 24
-	}
-	if m.width-logWidth < 40 {
-		logWidth = m.width - 40
-	}
-	if logWidth < 20 {
-		logWidth = 20
-	}
-	gapWidth := 1
-	chatWidth := m.width - logWidth - gapWidth
-	if chatWidth < 20 {
-		chatWidth = 20
-	}
+	m.logPaneWidth = clampLogPaneWidth(m.width, m.logPaneWidth)
+	chatWidth := m.chatPaneWidth()
 
 	// viewport 宽度要扣掉边框左右各 1 列，避免内容挤破右边界。
-	m.chatView.Width = chatWidth - 2
+	m.chatView.Width = maxInt(1, chatWidth-2)
 	m.chatView.Height = viewportHeight - 2
-	m.logView.Width = logWidth - 2
+	m.logView.Width = maxInt(1, m.logPaneWidth-2)
 	m.logView.Height = viewportHeight - 2
-	m.input.SetWidth(m.width - 2)
+	m.input.SetWidth(maxInt(1, m.width-2))
 	m.input.SetHeight(inputHeight)
 	m.refreshViews()
+}
+
+func (m tuiModel) chatPaneWidth() int {
+	return m.width - m.logPaneWidth - paneGapWidth
+}
+
+func defaultLogPaneWidth(totalWidth int) int {
+	logWidth := 34
+	if totalWidth < 100 {
+		logWidth = totalWidth / 3
+	}
+	return clampLogPaneWidth(totalWidth, logWidth)
+}
+
+func clampLogPaneWidth(totalWidth int, desired int) int {
+	available := totalWidth - paneGapWidth
+	if available <= 0 {
+		return 1
+	}
+	minLog := minLogPaneWidth
+	minChat := minChatPaneWidth
+	if available < minLog+minChat {
+		if available <= 2 {
+			return maxInt(1, available-1)
+		}
+		minLog = available / 3
+		if minLog < 1 {
+			minLog = 1
+		}
+		minChat = available - minLog
+		if minChat < 1 {
+			minChat = 1
+			minLog = available - minChat
+		}
+	}
+	maxLog := available - minChat
+	if maxLog < minLog {
+		maxLog = minLog
+	}
+	return clampInt(desired, minLog, maxLog)
+}
+
+func clampInt(value int, minValue int, maxValue int) int {
+	if value < minValue {
+		return minValue
+	}
+	if value > maxValue {
+		return maxValue
+	}
+	return value
+}
+
+func maxInt(a int, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+func (m *tuiModel) handleMouse(msg tea.MouseMsg) bool {
+	switch {
+	case isMouseRelease(msg):
+		if !m.draggingDivider {
+			return false
+		}
+		m.draggingDivider = false
+		return true
+
+	case isMouseLeftPress(msg) && m.isDividerHit(msg.X, msg.Y):
+		m.draggingDivider = true
+		m.resizeFromDividerX(msg.X)
+		return true
+
+	case m.draggingDivider && isMouseDrag(msg):
+		m.resizeFromDividerX(msg.X)
+		return true
+	}
+	return false
+}
+
+func isMouseLeftPress(msg tea.MouseMsg) bool {
+	return msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft || msg.Type == tea.MouseLeft
+}
+
+func isMouseRelease(msg tea.MouseMsg) bool {
+	return msg.Action == tea.MouseActionRelease || msg.Type == tea.MouseRelease
+}
+
+func isMouseDrag(msg tea.MouseMsg) bool {
+	return msg.Action == tea.MouseActionMotion || msg.Type == tea.MouseMotion
+}
+
+func (m tuiModel) isDividerHit(x int, y int) bool {
+	if m.width <= 0 || m.height <= 0 {
+		return false
+	}
+	bodyTop := 1
+	bodyBottom := bodyTop + m.chatView.Height + 1
+	dividerX := m.chatPaneWidth()
+	return y >= bodyTop && y <= bodyBottom && x >= dividerX-1 && x <= dividerX+1
+}
+
+func (m *tuiModel) resizeFromDividerX(x int) {
+	desiredLogWidth := m.width - x - paneGapWidth
+	m.logPaneWidth = clampLogPaneWidth(m.width, desiredLogWidth)
+	m.resize()
 }
 
 func (m *tuiModel) refreshViews() {
@@ -327,14 +437,14 @@ func (m tuiModel) View() string {
 		" ",
 		m.styles.help.Render(status),
 	)
-	help := m.styles.help.Render("Ctrl+S 发送 | Enter 换行 | Ctrl+C 退出")
+	help := m.styles.help.Render("Ctrl+S 发送 | Enter 换行 | 拖动中线调整宽度 | Ctrl+C 退出")
 	if m.approving {
 		help = m.styles.warn.Render("权限确认中：按 y 允许，按 n 拒绝")
 	}
 
 	chatPane := m.renderPane("对话", m.chatView.View(), m.chatView.Width+2, m.chatView.Height+2)
 	logPane := m.renderPane("日志", m.logView.View(), m.logView.Width+2, m.logView.Height+2)
-	body := lipgloss.JoinHorizontal(lipgloss.Top, chatPane, " ", logPane)
+	body := lipgloss.JoinHorizontal(lipgloss.Top, chatPane, m.renderDivider(m.chatView.Height+2), logPane)
 
 	return strings.Join([]string{
 		header,
@@ -349,4 +459,15 @@ func (m tuiModel) renderPane(title string, content string, width int, height int
 	titleLine := m.styles.pane.Width(width - 2).Render(title)
 	body := lipgloss.JoinVertical(lipgloss.Left, titleLine, content)
 	return m.styles.box.Width(width - 2).Height(height - 2).Render(body)
+}
+
+func (m tuiModel) renderDivider(height int) string {
+	if height <= 0 {
+		return ""
+	}
+	lines := make([]string, height)
+	for i := range lines {
+		lines[i] = "│"
+	}
+	return m.styles.divider.Render(strings.Join(lines, "\n"))
 }
