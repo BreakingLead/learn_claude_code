@@ -20,17 +20,16 @@ type uiEvent struct {
 }
 
 type agentRuntime struct {
-	config          agentConfig
-	hooks           map[HookEvent][]HookCallback
-	events          chan<- uiEvent
-	approvals       <-chan bool
-	modules         *moduleManager
-	background      *backgroundRegistry
-	currentTodos    []Todo
-	roundsSinceTodo int
-	promptCache     promptCache
-	memoryTurns     int
-	recovery        recoveryState
+	config      agentConfig
+	hooks       map[HookEvent][]HookCallback
+	events      chan<- uiEvent
+	approvals   <-chan bool
+	modules     *moduleManager
+	todo        *todoModule
+	background  *backgroundRegistry
+	promptCache promptCache
+	memoryTurns int
+	recovery    recoveryState
 }
 
 type agentConfig struct {
@@ -97,8 +96,10 @@ func newAgentRuntime(config agentConfig, events chan<- uiEvent, approvals <-chan
 	}
 	rt.background = newBackgroundRegistry(rt.emitLine)
 	rt.recovery = newRecoveryState(config)
+	rt.todo = &todoModule{}
 	rt.modules = newModuleManager(
 		&projectContextModule{},
+		rt.todo,
 		&memoryContextModule{},
 	)
 	if err := rt.modules.init(ModuleContext{

@@ -7,7 +7,7 @@ package agent
 // 这里用 agentSpec 保存差异：
 //   - ToolNames 决定能看见和调用哪些工具。
 //   - MaxTurns/UseRecovery 决定生命周期和错误恢复策略。
-//   - 若干布尔开关决定是否接入记忆、后台通知、todo reminder、Stop hook 等主 agent 能力。
+//   - 若干布尔开关决定是否接入记忆、后台通知、Stop hook 等主 agent 能力。
 //
 // 后续如果要做“不同系统提示词、不同工具集、不同模块”的按需加载，可以继续扩展
 // agentSpec，而不是复制 agent loop。
@@ -35,7 +35,6 @@ type agentSpec struct {
 	// 下面这些开关把主 agent 的生命周期能力显式化，subagent 默认不继承。
 	InjectRelevantMemories        bool
 	InjectBackgroundNotifications bool
-	UseTodoReminder               bool
 	UseCompaction                 bool
 	UseStopHooks                  bool
 	ExtractMemoriesOnStop         bool
@@ -59,11 +58,10 @@ func (rt *agentRuntime) mainAgentSpec() agentSpec {
 	return agentSpec{
 		ID:                            "main",
 		DisplayName:                   "Agent",
-		ToolNames:                     toolNames(buildTools()),
+		ToolNames:                     toolNames(rt.buildTools()),
 		UseRecovery:                   true,
 		InjectRelevantMemories:        true,
 		InjectBackgroundNotifications: true,
-		UseTodoReminder:               true,
 		UseCompaction:                 true,
 		UseStopHooks:                  true,
 		ExtractMemoriesOnStop:         true,
@@ -87,7 +85,7 @@ func (rt *agentRuntime) subagentSpec() agentSpec {
 
 // runAgent 是 agent/subagent 共用状态机：准备上下文、调用模型、处理工具、判断停止。
 func (rt *agentRuntime) runAgent(ctx context.Context, client anthropic.Client, spec agentSpec, messages *[]anthropic.MessageParam) agentRunResult {
-	tools := filterToolsByName(buildTools(), spec.ToolNames)
+	tools := filterToolsByName(rt.buildTools(), spec.ToolNames)
 	names := toolNames(tools)
 	handlers := filterToolHandlers(rt.toolHandlers(), names)
 
@@ -99,18 +97,19 @@ func (rt *agentRuntime) runAgent(ctx context.Context, client anthropic.Client, s
 	}
 
 	for turn := 0; spec.MaxTurns <= 0 || turn < spec.MaxTurns; turn++ {
-		// 每轮模型调用前先做运行时维护：压缩历史、注入后台完成通知、提醒 todo。
+		// 每轮模型调用前先做运行时维护：压缩历史、注入后台完成通知、运行模块 hook。
 		if spec.UseCompaction {
 			*messages = rt.maybeCompactHistory(*messages)
 		}
 		if spec.InjectBackgroundNotifications {
 			rt.injectBackgroundNotifications(messages)
 		}
-		if spec.UseTodoReminder && rt.roundsSinceTodo >= 3 && len(*messages) > 0 {
-			*messages = append(*messages, anthropic.NewUserMessage(
-				anthropic.NewTextBlock("<reminder>Update your todos.</reminder>"),
-			))
-			rt.roundsSinceTodo = 0
+		if rt.modules != nil {
+			*messages = append(*messages, rt.modules.beforeModel(ctx, TurnRequest{
+				AgentID:   spec.ID,
+				ToolNames: names,
+				Messages:  *messages,
+			})...)
 		}
 
 		resp, err := rt.callAgentModel(ctx, client, spec, tools, names, messages)
@@ -144,12 +143,13 @@ func (rt *agentRuntime) runAgent(ctx context.Context, client anthropic.Client, s
 			return agentRunResult{FinalText: latestAssistantText(*messages), Turns: turn + 1, StoppedBy: string(resp.StopReason)}
 		}
 
-		// tool_use 轮会增加 todo 提醒计数，todo_write 工具执行后会在 runAgentTools 中清零。
-		if spec.UseTodoReminder {
-			rt.roundsSinceTodo++
+		toolResults, usedToolNames := rt.runAgentTools(ctx, resp, handlers, spec)
+		if rt.modules != nil {
+			rt.modules.afterToolRound(ctx, ToolRoundEvent{
+				AgentID:   spec.ID,
+				ToolNames: usedToolNames,
+			})
 		}
-
-		toolResults := rt.runAgentTools(resp, handlers, spec)
 		*messages = append(*messages, anthropic.NewUserMessage(toolResults...))
 		if spec.UseCompaction {
 			*messages = rt.maybeCompactHistory(*messages)
@@ -178,8 +178,9 @@ func (rt *agentRuntime) callAgentModel(ctx context.Context, client anthropic.Cli
 }
 
 // runAgentTools 执行本轮所有 tool_use，并统一接入权限 hook、post hook 和日志。
-func (rt *agentRuntime) runAgentTools(resp *anthropic.Message, handlers map[string]ToolHandler, spec agentSpec) []anthropic.ContentBlockParamUnion {
+func (rt *agentRuntime) runAgentTools(ctx context.Context, resp *anthropic.Message, handlers map[string]ToolHandler, spec agentSpec) ([]anthropic.ContentBlockParamUnion, []string) {
 	var toolResults []anthropic.ContentBlockParamUnion
+	var usedToolNames []string
 	for _, block := range resp.Content {
 		tb, ok := block.AsAny().(anthropic.ToolUseBlock)
 		if !ok {
@@ -202,16 +203,20 @@ func (rt *agentRuntime) runAgentTools(resp *anthropic.Message, handlers map[stri
 
 		inputJSON, _ := json.Marshal(tb.Input)
 		output := handler(inputJSON)
+		usedToolNames = append(usedToolNames, tb.Name)
 		rt.triggerHooks(EventPostToolUse, tb, output)
-
-		if tb.Name == "todo_write" {
-			rt.roundsSinceTodo = 0
+		if rt.modules != nil {
+			rt.modules.afterToolUse(ctx, ToolUseEvent{
+				AgentID: spec.ID,
+				Name:    tb.Name,
+				Output:  output,
+			})
 		}
 		rt.logAgentToolOutput(tb.Name, output, spec)
 
 		toolResults = append(toolResults, anthropic.NewToolResultBlock(tb.ID, output, false))
 	}
-	return toolResults
+	return toolResults, usedToolNames
 }
 
 // logAgentToolOutput 根据 spec 选择主 agent 或 subagent 的工具日志样式。
@@ -272,4 +277,13 @@ func latestAssistantText(messages []anthropic.MessageParam) string {
 		}
 	}
 	return ""
+}
+
+func hasString(values []string, needle string) bool {
+	for _, value := range values {
+		if value == needle {
+			return true
+		}
+	}
+	return false
 }

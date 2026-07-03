@@ -690,8 +690,8 @@ func (m tuiModel) renderRuntimeDebug() string {
 		"activeTab":         m.activeTabName(),
 		"messageCount":      len(m.history),
 		"logCount":          len(m.logs),
-		"currentTodos":      m.rt.currentTodos,
-		"roundsSinceTodo":   m.rt.roundsSinceTodo,
+		"currentTodos":      m.rt.todo.currentTodos,
+		"roundsSinceTodo":   m.rt.todo.roundsSinceTodo,
 		"memoryTurns":       m.rt.memoryTurns,
 		"promptCacheKey":    m.rt.promptCache.contextKey,
 		"promptCacheLength": len(m.rt.promptCache.prompt),
@@ -734,7 +734,7 @@ func highlightCode(source string, lexer string) string {
 }
 
 func (m tuiModel) renderCurrentSystemPrompt() string {
-	tools := buildTools()
+	tools := m.rt.buildTools()
 	return assembleSystemPrompt(m.rt.promptContext(toolNames(tools)))
 }
 

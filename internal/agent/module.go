@@ -10,6 +10,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/anthropics/anthropic-sdk-go"
 )
 
 // Module 是所有内部模块的最小身份和初始化接口。
@@ -21,6 +23,19 @@ type Module interface {
 // PromptContributor 表示模块可以向 system prompt 贡献上下文块。
 type PromptContributor interface {
 	PromptBlocks(ctx context.Context, req PromptRequest) ([]PromptBlock, error)
+}
+
+// ToolContributor 表示模块可以注册工具 schema 和对应 handler。
+type ToolContributor interface {
+	ToolDefinitions() []anthropic.ToolParam
+	ToolHandlers() map[string]ToolHandler
+}
+
+// TurnContributor 表示模块可以在模型调用前或工具调用后更新状态/注入消息。
+type TurnContributor interface {
+	BeforeModel(ctx context.Context, req TurnRequest) []anthropic.MessageParam
+	AfterToolUse(ctx context.Context, event ToolUseEvent)
+	AfterToolRound(ctx context.Context, event ToolRoundEvent)
 }
 
 // ModuleContext 是 runtime 显式传给模块的初始化上下文。
@@ -41,6 +56,26 @@ type PromptBlock struct {
 	Name    string
 	Source  string
 	Content string
+}
+
+// TurnRequest 是一次模型调用前传给模块的只读上下文。
+type TurnRequest struct {
+	AgentID   string
+	ToolNames []string
+	Messages  []anthropic.MessageParam
+}
+
+// ToolUseEvent 是工具执行后传给模块的事件。
+type ToolUseEvent struct {
+	AgentID string
+	Name    string
+	Output  string
+}
+
+// ToolRoundEvent 是一轮 tool_use 全部执行完成后的事件。
+type ToolRoundEvent struct {
+	AgentID   string
+	ToolNames []string
 }
 
 type moduleManager struct {
@@ -83,6 +118,69 @@ func (m *moduleManager) promptBlocks(ctx context.Context, req PromptRequest) []P
 		blocks = append(blocks, moduleBlocks...)
 	}
 	return blocks
+}
+
+// toolDefinitions 收集所有模块贡献的工具 schema。
+func (m *moduleManager) toolDefinitions() []anthropic.ToolParam {
+	var tools []anthropic.ToolParam
+	for _, module := range m.modules {
+		contributor, ok := module.(ToolContributor)
+		if !ok {
+			continue
+		}
+		tools = append(tools, contributor.ToolDefinitions()...)
+	}
+	return tools
+}
+
+// toolHandlers 收集所有模块贡献的工具 handler。
+func (m *moduleManager) toolHandlers() map[string]ToolHandler {
+	handlers := map[string]ToolHandler{}
+	for _, module := range m.modules {
+		contributor, ok := module.(ToolContributor)
+		if !ok {
+			continue
+		}
+		for name, handler := range contributor.ToolHandlers() {
+			handlers[name] = handler
+		}
+	}
+	return handlers
+}
+
+// beforeModel 让模块在模型调用前注入内部消息。
+func (m *moduleManager) beforeModel(ctx context.Context, req TurnRequest) []anthropic.MessageParam {
+	var messages []anthropic.MessageParam
+	for _, module := range m.modules {
+		contributor, ok := module.(TurnContributor)
+		if !ok {
+			continue
+		}
+		messages = append(messages, contributor.BeforeModel(ctx, req)...)
+	}
+	return messages
+}
+
+// afterToolUse 通知模块工具执行结果，用于更新模块内部状态。
+func (m *moduleManager) afterToolUse(ctx context.Context, event ToolUseEvent) {
+	for _, module := range m.modules {
+		contributor, ok := module.(TurnContributor)
+		if !ok {
+			continue
+		}
+		contributor.AfterToolUse(ctx, event)
+	}
+}
+
+// afterToolRound 通知模块本轮 tool_use 已全部执行完成。
+func (m *moduleManager) afterToolRound(ctx context.Context, event ToolRoundEvent) {
+	for _, module := range m.modules {
+		contributor, ok := module.(TurnContributor)
+		if !ok {
+			continue
+		}
+		contributor.AfterToolRound(ctx, event)
+	}
 }
 
 type projectContextModule struct {

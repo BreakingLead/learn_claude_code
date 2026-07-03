@@ -10,9 +10,9 @@ internal/agent/     agent 实现，只供本项目内部使用
   main.go           REPL 入口 + 主 agent 薄包装
   agent_runner.go   agent/subagent 统一执行状态机与 agentSpec
   runtime.go        显式运行时状态、配置、hooks、UI 事件、prompt 缓存
-  module.go         内部模块共通 API、moduleManager、prompt block 收集
+  module.go         内部模块共通 API、moduleManager、prompt/tool/turn hook 收集
   constants.go      环境变量读取、终端颜色辅助
-  tools.go          8 个工具的定义（JSON Schema）与处理函数
+  tools.go          基础工具定义（JSON Schema）与处理函数
   permission.go     三层权限门控：拒绝列表 → 规则检查 → 用户确认
   hooks.go          事件钩子系统：PreToolUse / PostToolUse / Stop 等
   compact.go        四层上下文压缩：snip → micro → persist → LLM 摘要
@@ -20,7 +20,7 @@ internal/agent/     agent 实现，只供本项目内部使用
   recovery.go       错误恢复：context overflow、max_tokens、rate limit、overload
   task_system.go    持久任务：维护 .agents/.tasks/*.json、依赖检查和 TASKS.md 索引
   background.go     后台命令：启动后台 bash 并注入完成通知
-  todo.go           任务列表管理
+  todo.go           todo 模块：todo_write 工具、当前任务列表、提醒 hook
   subagent.go       子 agent 生成（独立消息、受限工具、30 轮上限）
   skills.go         技能扫描与加载（.agents/skills/）
   system_prompt.go  系统提示词上下文收集、缓存与组装

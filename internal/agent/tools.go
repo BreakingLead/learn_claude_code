@@ -16,13 +16,12 @@ type ToolHandler func(input json.RawMessage) string
 
 // toolHandlers 返回当前运行时绑定的工具处理函数。
 func (rt *agentRuntime) toolHandlers() map[string]ToolHandler {
-	return map[string]ToolHandler{
+	handlers := map[string]ToolHandler{
 		"bash":              rt.runBash,
 		"read_file":         rt.runRead,
 		"write_file":        rt.runWrite,
 		"edit_file":         rt.runEdit,
 		"glob":              rt.runGlob,
-		"todo_write":        rt.runTodoWrite,
 		"task":              rt.spawnSubagent,
 		"load_skill":        rt.loadSkill,
 		"task_create":       rt.runTaskCreate,
@@ -34,6 +33,12 @@ func (rt *agentRuntime) toolHandlers() map[string]ToolHandler {
 		"background_status": rt.runBackgroundStatus,
 		"background_list":   rt.runBackgroundList,
 	}
+	if rt.modules != nil {
+		for name, handler := range rt.modules.toolHandlers() {
+			handlers[name] = handler
+		}
+	}
+	return handlers
 }
 
 // ── 工具实现 ──────────────────────────────────────────
@@ -180,7 +185,19 @@ func (rt *agentRuntime) runGlob(raw json.RawMessage) string {
 
 // ── 工具 Schema 定义 ──────────────────────────────────
 
-func buildTools() []anthropic.ToolUnionParam {
+func (rt *agentRuntime) buildTools() []anthropic.ToolUnionParam {
+	toolParams := buildBaseToolParams()
+	if rt != nil && rt.modules != nil {
+		toolParams = append(toolParams, rt.modules.toolDefinitions()...)
+	}
+	tools := make([]anthropic.ToolUnionParam, len(toolParams))
+	for i, tp := range toolParams {
+		tools[i] = anthropic.ToolUnionParam{OfTool: &tp}
+	}
+	return tools
+}
+
+func buildBaseToolParams() []anthropic.ToolParam {
 	toolParams := []anthropic.ToolParam{
 		{
 			Name:        "bash",
@@ -234,27 +251,6 @@ func buildTools() []anthropic.ToolUnionParam {
 					"pattern": map[string]any{"type": "string"},
 				},
 				Required: []string{"pattern"},
-			},
-		},
-		{
-			Name:        "todo_write",
-			Description: anthropic.String("Create and manage a task list."),
-			InputSchema: anthropic.ToolInputSchemaParam{
-				Properties: map[string]any{
-					"todos": map[string]any{
-						"type": "array",
-						"items": map[string]any{
-							"type": "object",
-							"properties": map[string]any{
-								"content": map[string]any{"type": "string"},
-								"status": map[string]any{
-									"type": "string",
-									"enum": []string{"pending", "in_progress", "completed"},
-								},
-							},
-						},
-					},
-				},
 			},
 		},
 		{
@@ -359,11 +355,7 @@ func buildTools() []anthropic.ToolUnionParam {
 		},
 	}
 
-	tools := make([]anthropic.ToolUnionParam, len(toolParams))
-	for i, tp := range toolParams {
-		tools[i] = anthropic.ToolUnionParam{OfTool: &tp}
-	}
-	return tools
+	return toolParams
 }
 
 func toolNames(tools []anthropic.ToolUnionParam) []string {
