@@ -1,15 +1,18 @@
 package agent
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
 
+	"github.com/alecthomas/chroma/v2/quick"
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/lipgloss"
 )
 
@@ -42,6 +45,7 @@ type tuiModel struct {
 	logView         viewport.Model
 	debugView       viewport.Model
 	input           textarea.Model
+	commands        *slashCommandRegistry
 	events          chan uiEvent
 	approvals       chan bool
 	width           int
@@ -62,6 +66,7 @@ type tuiStyles struct {
 	ai      lipgloss.Style
 	log     lipgloss.Style
 	warn    lipgloss.Style
+	command lipgloss.Style
 	pane    lipgloss.Style
 	divider lipgloss.Style
 	box     lipgloss.Style
@@ -79,6 +84,10 @@ func newTUIStyles() tuiStyles {
 		ai:   lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("82")),
 		log:  lipgloss.NewStyle().Foreground(lipgloss.Color("244")),
 		warn: lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("214")),
+		command: lipgloss.NewStyle().
+			Foreground(lipgloss.Color("228")).
+			Background(lipgloss.Color("236")).
+			Padding(0, 1),
 		pane: lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("245")),
 		divider: lipgloss.NewStyle().
 			Foreground(lipgloss.Color("240")),
@@ -127,6 +136,7 @@ func newTUIModel(ctx context.Context, client anthropic.Client, rt *agentRuntime,
 		logView:      logView,
 		debugView:    debugView,
 		input:        ti,
+		commands:     newSlashCommandRegistry(),
 		events:       events,
 		approvals:    approvals,
 		logPaneWidth: 34,
@@ -163,9 +173,8 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.resize()
 
 	case tea.MouseMsg:
-		if m.activeTab == tuiTabMain && m.handleMouse(msg) {
-			return m, nil
-		}
+		m.handleMouse(msg)
+		return m, nil
 
 	case tea.KeyMsg:
 		switch {
@@ -203,6 +212,14 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if query == "" {
 				return m, nil
 			}
+			if command, ok := m.executeSlashCommand(query); ok {
+				m.input.Reset()
+				m.refreshViews()
+				if command != nil {
+					cmds = append(cmds, command)
+				}
+				return m, tea.Batch(cmds...)
+			}
 			if query == "q" || query == "exit" {
 				return m, tea.Quit
 			}
@@ -213,6 +230,12 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.status = "thinking"
 			m.refreshViews()
 			cmds = append(cmds, runAgentTurn(m.ctx, m.client, m.rt, append([]anthropic.MessageParam(nil), m.history...)))
+
+		case !m.running && !m.approving && msg.String() == "tab":
+			if m.completeSlashCommand() {
+				m.refreshViews()
+				return m, nil
+			}
 
 		case !m.approving:
 			var cmd tea.Cmd
@@ -264,7 +287,8 @@ func (m *tuiModel) resize() {
 	headerHeight := 1
 	helpHeight := 1
 	inputHeight := 5
-	viewportHeight := m.height - headerHeight - helpHeight - inputHeight - 2
+	commandHintHeight := 1
+	viewportHeight := m.height - headerHeight - helpHeight - commandHintHeight - inputHeight - 2
 	if viewportHeight < 5 {
 		viewportHeight = 5
 	}
@@ -284,6 +308,36 @@ func (m *tuiModel) resize() {
 	m.input.SetWidth(maxInt(1, m.width-2))
 	m.input.SetHeight(inputHeight)
 	m.refreshViews()
+}
+
+func (m *tuiModel) executeSlashCommand(query string) (tea.Cmd, bool) {
+	name, args, ok := parseSlashCommand(query)
+	if !ok {
+		return nil, false
+	}
+	if name == "" {
+		m.logs = append(m.logs, m.styles.warn.Render("请输入命令名，按 Tab 查看可用命令"))
+		return nil, true
+	}
+	command, found := m.commands.get(name)
+	if !found {
+		m.logs = append(m.logs, m.styles.warn.Render(fmt.Sprintf("未知命令：/%s。输入 /help 查看可用命令。", name)))
+		return nil, true
+	}
+	return command.Handler(m, args), true
+}
+
+func (m *tuiModel) completeSlashCommand() bool {
+	prefix, ok := slashCommandPrefix(m.input.Value())
+	if !ok {
+		return false
+	}
+	candidates := m.commands.complete(prefix)
+	if len(candidates) == 0 {
+		return false
+	}
+	m.input.SetValue(candidates[0].Usage + " ")
+	return true
 }
 
 func (m tuiModel) chatPaneWidth() int {
@@ -344,12 +398,16 @@ func maxInt(a int, b int) int {
 }
 
 func (m *tuiModel) handleMouse(msg tea.MouseMsg) bool {
+	if m.activeTab == tuiTabDebug {
+		m.scrollDebugByMouse(msg)
+		return true
+	}
+
 	switch {
 	case isMouseRelease(msg):
-		if !m.draggingDivider {
-			return false
+		if m.draggingDivider {
+			m.draggingDivider = false
 		}
-		m.draggingDivider = false
 		return true
 
 	case isMouseLeftPress(msg) && m.isDividerHit(msg.X, msg.Y):
@@ -360,8 +418,12 @@ func (m *tuiModel) handleMouse(msg tea.MouseMsg) bool {
 	case m.draggingDivider && isMouseDrag(msg):
 		m.resizeFromDividerX(msg.X)
 		return true
+
+	case isMouseWheel(msg):
+		m.scrollMainPaneByMouse(msg)
+		return true
 	}
-	return false
+	return true
 }
 
 func isMouseLeftPress(msg tea.MouseMsg) bool {
@@ -376,20 +438,69 @@ func isMouseDrag(msg tea.MouseMsg) bool {
 	return msg.Action == tea.MouseActionMotion || msg.Type == tea.MouseMotion
 }
 
+func isMouseWheel(msg tea.MouseMsg) bool {
+	if msg.Action != tea.MouseActionPress {
+		return false
+	}
+	return msg.Button == tea.MouseButtonWheelUp ||
+		msg.Button == tea.MouseButtonWheelDown ||
+		msg.Button == tea.MouseButtonWheelLeft ||
+		msg.Button == tea.MouseButtonWheelRight
+}
+
 func (m tuiModel) isDividerHit(x int, y int) bool {
 	if m.width <= 0 || m.height <= 0 {
 		return false
 	}
-	bodyTop := 1
-	bodyBottom := bodyTop + m.chatView.Height + 1
 	dividerX := m.chatPaneWidth()
-	return y >= bodyTop && y <= bodyBottom && x >= dividerX-1 && x <= dividerX+1
+	return m.isMainBodyY(y) && x >= dividerX-1 && x <= dividerX+1
 }
 
 func (m *tuiModel) resizeFromDividerX(x int) {
 	desiredLogWidth := m.width - x - paneGapWidth
 	m.logPaneWidth = clampLogPaneWidth(m.width, desiredLogWidth)
 	m.resize()
+}
+
+func (m *tuiModel) scrollMainPaneByMouse(msg tea.MouseMsg) {
+	var cmd tea.Cmd
+	switch {
+	case m.isChatHit(msg.X, msg.Y):
+		m.chatView, cmd = m.chatView.Update(msg)
+	case m.isLogHit(msg.X, msg.Y):
+		m.logView, cmd = m.logView.Update(msg)
+	}
+	_ = cmd
+}
+
+func (m *tuiModel) scrollDebugByMouse(msg tea.MouseMsg) {
+	if !isMouseWheel(msg) || !m.isDebugHit(msg.X, msg.Y) {
+		return
+	}
+	var cmd tea.Cmd
+	m.debugView, cmd = m.debugView.Update(msg)
+	_ = cmd
+}
+
+func (m tuiModel) isMainBodyY(y int) bool {
+	bodyTop := 1
+	bodyBottom := bodyTop + m.chatView.Height + 1
+	return y >= bodyTop && y <= bodyBottom
+}
+
+func (m tuiModel) isChatHit(x int, y int) bool {
+	return m.isMainBodyY(y) && x >= 0 && x < m.chatPaneWidth()
+}
+
+func (m tuiModel) isLogHit(x int, y int) bool {
+	logStart := m.chatPaneWidth() + paneGapWidth
+	return m.isMainBodyY(y) && x >= logStart && x < logStart+m.logPaneWidth
+}
+
+func (m tuiModel) isDebugHit(x int, y int) bool {
+	bodyTop := 1
+	bodyBottom := bodyTop + m.debugView.Height + 1
+	return y >= bodyTop && y <= bodyBottom && x >= 0 && x < m.width
 }
 
 func (m *tuiModel) refreshViews() {
@@ -451,19 +562,38 @@ func (m tuiModel) renderMessage(message anthropic.MessageParam) string {
 	case "user":
 		return m.styles.user.Render("You") + "\n" + body
 	case "assistant":
-		return m.styles.ai.Render("Agent") + "\n" + body
+		return m.styles.ai.Render("Agent") + "\n" + m.renderMarkdown(body)
 	default:
 		return body
 	}
 }
 
+func (m tuiModel) renderMarkdown(content string) string {
+	width := maxInt(20, m.chatView.Width-2)
+	renderer, err := glamour.NewTermRenderer(
+		glamour.WithAutoStyle(),
+		glamour.WithWordWrap(width),
+	)
+	if err != nil {
+		return content
+	}
+	rendered, err := renderer.Render(content)
+	if err != nil {
+		return content
+	}
+	return strings.TrimRight(rendered, "\n")
+}
+
 func (m tuiModel) renderDebug() string {
 	var sections []string
 	sections = append(sections, "Runtime")
-	sections = append(sections, m.renderRuntimeDebug())
+	sections = append(sections, highlightCode(m.renderRuntimeDebug(), "json"))
+	sections = append(sections, "")
+	sections = append(sections, "System Prompt")
+	sections = append(sections, m.renderCurrentSystemPrompt())
 	sections = append(sections, "")
 	sections = append(sections, "Messages")
-	sections = append(sections, marshalDebugJSON(m.history))
+	sections = append(sections, highlightCode(marshalDebugJSON(m.history), "json"))
 	return strings.Join(sections, "\n")
 }
 
@@ -527,6 +657,19 @@ func marshalDebugJSON(value any) string {
 	return string(raw)
 }
 
+func highlightCode(source string, lexer string) string {
+	var buf bytes.Buffer
+	if err := quick.Highlight(&buf, source, lexer, "terminal256", "monokai"); err != nil {
+		return source
+	}
+	return strings.TrimRight(buf.String(), "\n")
+}
+
+func (m tuiModel) renderCurrentSystemPrompt() string {
+	tools := buildTools()
+	return assembleSystemPrompt(m.rt.promptContext(toolNames(tools)))
+}
+
 // View 每次状态变化后重新渲染整屏；Bubble Tea 会负责 diff 和绘制。
 func (m tuiModel) View() string {
 	status := m.status
@@ -545,7 +688,7 @@ func (m tuiModel) View() string {
 		" ",
 		m.styles.help.Render(status),
 	)
-	help := m.styles.help.Render("1 对话 | 2 Debug | Ctrl+S 发送 | Enter 换行 | 拖动中线调整宽度 | Ctrl+C 退出")
+	help := m.styles.help.Render("1 对话 | 2 Debug | Tab 补全命令 | Ctrl+S 发送 | Enter 换行 | 拖动中线调整宽度 | Ctrl+C 退出")
 	if m.approving {
 		help = m.styles.warn.Render("权限确认中：按 y 允许，按 n 拒绝")
 	}
@@ -562,9 +705,32 @@ func (m tuiModel) View() string {
 	return strings.Join([]string{
 		header,
 		body,
+		m.renderSlashCommandHint(),
 		m.input.View(),
 		help,
 	}, "\n")
+}
+
+func (m tuiModel) renderSlashCommandHint() string {
+	prefix, ok := slashCommandPrefix(m.input.Value())
+	if !ok {
+		return ""
+	}
+	candidates := m.commands.complete(prefix)
+	if len(candidates) == 0 {
+		return m.styles.warn.Render("无匹配命令。输入 /help 查看可用命令。")
+	}
+
+	items := make([]string, 0, len(candidates))
+	for i, command := range candidates {
+		if i >= 5 {
+			items = append(items, "...")
+			break
+		}
+		items = append(items, fmt.Sprintf("%s %s", command.Usage, command.Description))
+	}
+	// 候选栏只做轻量提示，真正执行仍由 Ctrl+S 统一拦截处理。
+	return m.styles.command.Width(maxInt(1, m.width-2)).Render("命令补全： " + strings.Join(items, "  |  "))
 }
 
 func (m tuiModel) renderPane(title string, content string, width int, height int) string {
