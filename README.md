@@ -48,7 +48,40 @@ go run ./cmd/bee-agent
 | Ctrl+C | 退出 |
 | y / n | 权限确认时允许 / 拒绝工具调用 |
 
-输入框以 `/` 开头时会先按本地命令处理，不会发送给 agent。内置命令包括 `/help`、`/clear`、`/debug`、`/chat`、`/quit`。
+输入框以 `/` 开头时会先按本地命令处理，不会发送给 agent。内置命令包括 `/help`、`/clear`、`/debug`、`/chat`、`/mode`、`/quit`。
+
+## Mode 配置
+
+`/mode` 查看当前可用模式，`/mode plan` 或 `/mode build` 切换模式。
+
+内置模式：
+
+- `plan`: 规划模式，不暴露 `bash`、`write_file`、`edit_file` 等可写工具，倾向先分析方案。
+- `build`: 构建模式，使用当前启用模块贡献的完整工具集。
+
+可以在 `.agents/modes.json` 中添加自定义模式：
+
+```json
+{
+  "default": "review",
+  "modes": [
+    {
+      "name": "review",
+      "description": "read-only review mode",
+      "prompt": "Review only. Report findings first.",
+      "tools": ["read_file", "glob", "bash"]
+    },
+    {
+      "name": "safe-build",
+      "description": "build without shell",
+      "prompt": "Implement changes without shell commands.",
+      "disable_tools": ["bash", "background_bash"]
+    }
+  ]
+}
+```
+
+`tools` 是允许列表；未设置时继承完整工具集。`disable_tools` 会从当前工具集中移除指定工具。也可以用 `BEE_AGENT_MODE=plan` 设置启动默认模式。
 
 ## 核心流程
 

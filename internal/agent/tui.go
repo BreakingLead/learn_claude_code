@@ -704,6 +704,8 @@ func (m tuiModel) renderRuntimeDebug() string {
 		"running":           m.running,
 		"approving":         m.approving,
 		"activeTab":         m.activeTabName(),
+		"mode":              m.rt.activeMode(),
+		"modeRegistry":      m.rt.modes.snapshot(),
 		"messageCount":      len(m.history),
 		"logCount":          len(m.logs),
 		"memoryTurns":       m.rt.memoryTurns,
@@ -748,8 +750,7 @@ func highlightCode(source string, lexer string) string {
 }
 
 func (m tuiModel) renderCurrentSystemPrompt() string {
-	tools := m.rt.buildTools()
-	return assembleSystemPrompt(m.rt.promptContext(toolNames(tools)))
+	return assembleSystemPrompt(m.rt.promptContext(m.rt.mainAgentSpec().ToolNames))
 }
 
 // View 每次状态变化后重新渲染整屏；Bubble Tea 会负责 diff 和绘制。
@@ -768,9 +769,11 @@ func (m tuiModel) View() string {
 		" ",
 		m.styles.help.Render("[1 对话] [2 Debug]"),
 		" ",
+		m.styles.help.Render("mode:"+m.rt.activeMode().Name),
+		" ",
 		m.styles.help.Render(status),
 	)
-	help := m.styles.help.Render("1 对话 | 2 Debug | Tab 补全命令 | Ctrl+S 发送 | Enter 换行 | 拖动中线调整宽度 | Ctrl+C 退出")
+	help := m.styles.help.Render("1 对话 | 2 Debug | /mode 切换模式 | Tab 补全命令 | Ctrl+S 发送 | Enter 换行 | 拖动中线调整宽度 | Ctrl+C 退出")
 	if m.approving {
 		help = m.styles.warn.Render("权限确认中：按 y 允许，按 n 拒绝")
 	}

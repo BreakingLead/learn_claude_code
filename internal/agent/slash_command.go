@@ -69,6 +69,25 @@ func newSlashCommandRegistry() *slashCommandRegistry {
 		},
 	})
 	registry.register(slashCommand{
+		Name:        "mode",
+		Usage:       "/mode [name]",
+		Description: "查看或切换 agent mode",
+		Handler: func(m *tuiModel, args string) tea.Cmd {
+			name := strings.TrimSpace(args)
+			if name == "" {
+				m.logs = append(m.logs, m.styles.log.Render(m.rt.modes.listText()))
+				return nil
+			}
+			if err := m.rt.switchMode(name); err != nil {
+				m.logs = append(m.logs, m.styles.warn.Render(err.Error()))
+				return nil
+			}
+			mode := m.rt.activeMode()
+			m.logs = append(m.logs, m.styles.log.Render(fmt.Sprintf("已切换到 %s mode：%s", mode.Name, mode.Description)))
+			return nil
+		},
+	})
+	registry.register(slashCommand{
 		Name:        "quit",
 		Usage:       "/quit",
 		Description: "退出 TUI",

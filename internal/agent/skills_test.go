@@ -106,6 +106,7 @@ func testConfig(workdir string) agentConfig {
 		TaskDir:            filepath.Join(workdir, ".agents", ".tasks"),
 		TaskIndex:          filepath.Join(workdir, ".agents", ".tasks", "TASKS.md"),
 		ScheduledTasksPath: filepath.Join(workdir, ".scheduled_tasks.json"),
+		ModeConfigPath:     filepath.Join(workdir, ".agents", "modes.json"),
 		BackgroundTimeout:  10 * time.Minute,
 	}
 }

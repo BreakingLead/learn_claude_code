@@ -50,11 +50,23 @@ func listSkills(skills []SkillInfo) string {
 func (rt *agentRuntime) promptContext(toolNames []string) promptContext {
 	sortedToolNames := append([]string(nil), toolNames...)
 	sort.Strings(sortedToolNames)
+	blocks := rt.modules.promptBlocks(context.Background(), PromptRequest{ToolNames: sortedToolNames})
+	mode := rt.activeMode()
+	if strings.TrimSpace(mode.Prompt) != "" {
+		blocks = append([]PromptBlock{
+			{
+				Module:  "mode",
+				Name:    fmt.Sprintf("Mode: %s", mode.Name),
+				Source:  "active mode",
+				Content: mode.Prompt,
+			},
+		}, blocks...)
+	}
 	return promptContext{
 		Workdir:      rt.config.Workdir,
 		Model:        rt.config.Model,
 		ToolNames:    sortedToolNames,
-		PromptBlocks: rt.modules.promptBlocks(context.Background(), PromptRequest{ToolNames: sortedToolNames}),
+		PromptBlocks: blocks,
 	}
 }
 

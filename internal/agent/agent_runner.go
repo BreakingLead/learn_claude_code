@@ -55,10 +55,11 @@ type agentRunResult struct {
 
 // mainAgentSpec 保留完整 agent 能力：恢复、记忆、后台通知、压缩和停止钩子都启用。
 func (rt *agentRuntime) mainAgentSpec() agentSpec {
+	tools := rt.modeToolNames(toolNames(rt.buildTools()))
 	return agentSpec{
 		ID:                            "main",
 		DisplayName:                   "Agent",
-		ToolNames:                     toolNames(rt.buildTools()),
+		ToolNames:                     tools,
 		UseRecovery:                   true,
 		InjectRelevantMemories:        rt.moduleEnabled("memory"),
 		InjectBackgroundNotifications: rt.moduleEnabled("background"),

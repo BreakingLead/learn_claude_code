@@ -36,6 +36,17 @@ func TestSlashCommandRegistryCompletesByPrefix(t *testing.T) {
 	}
 }
 
+func TestSlashCommandRegistryIncludesMode(t *testing.T) {
+	registry := newSlashCommandRegistry()
+	command, ok := registry.get("mode")
+	if !ok {
+		t.Fatal("expected /mode command")
+	}
+	if command.Usage != "/mode [name]" {
+		t.Fatalf("unexpected mode usage: %q", command.Usage)
+	}
+}
+
 func TestSlashCommandPrefixRequiresLeadingSlash(t *testing.T) {
 	prefix, ok := slashCommandPrefix("  /he")
 	if !ok || prefix != "he" {
