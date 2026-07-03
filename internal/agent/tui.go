@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -24,6 +25,13 @@ const (
 	minLogPaneWidth  = 20
 )
 
+type tuiTab int
+
+const (
+	tuiTabMain tuiTab = iota
+	tuiTabDebug
+)
+
 type tuiModel struct {
 	ctx             context.Context
 	client          anthropic.Client
@@ -32,6 +40,7 @@ type tuiModel struct {
 	history         []anthropic.MessageParam
 	chatView        viewport.Model
 	logView         viewport.Model
+	debugView       viewport.Model
 	input           textarea.Model
 	events          chan uiEvent
 	approvals       chan bool
@@ -39,6 +48,7 @@ type tuiModel struct {
 	height          int
 	logPaneWidth    int
 	draggingDivider bool
+	activeTab       tuiTab
 	running         bool
 	approving       bool
 	status          string
@@ -99,6 +109,9 @@ func newTUIModel(ctx context.Context, client anthropic.Client, rt *agentRuntime,
 	logView := viewport.New(24, 20)
 	logView.SetContent("暂无日志。")
 
+	debugView := viewport.New(80, 20)
+	debugView.SetContent("暂无 runtime 信息。")
+
 	ti := textarea.New()
 	ti.Placeholder = "输入你的问题..."
 	ti.Focus()
@@ -112,6 +125,7 @@ func newTUIModel(ctx context.Context, client anthropic.Client, rt *agentRuntime,
 		styles:       newTUIStyles(),
 		chatView:     chatView,
 		logView:      logView,
+		debugView:    debugView,
 		input:        ti,
 		events:       events,
 		approvals:    approvals,
@@ -149,12 +163,22 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.resize()
 
 	case tea.MouseMsg:
-		if m.handleMouse(msg) {
+		if m.activeTab == tuiTabMain && m.handleMouse(msg) {
 			return m, nil
 		}
 
 	case tea.KeyMsg:
 		switch {
+		case msg.String() == "1":
+			m.activeTab = tuiTabMain
+			m.refreshViews()
+			return m, nil
+
+		case msg.String() == "2":
+			m.activeTab = tuiTabDebug
+			m.refreshViews()
+			return m, nil
+
 		case m.approving && (msg.String() == "y" || msg.String() == "Y"):
 			m.approving = false
 			m.status = "running"
@@ -220,10 +244,15 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	var cmd tea.Cmd
-	m.chatView, cmd = m.chatView.Update(msg)
-	cmds = append(cmds, cmd)
-	m.logView, cmd = m.logView.Update(msg)
-	cmds = append(cmds, cmd)
+	if m.activeTab == tuiTabDebug {
+		m.debugView, cmd = m.debugView.Update(msg)
+		cmds = append(cmds, cmd)
+	} else {
+		m.chatView, cmd = m.chatView.Update(msg)
+		cmds = append(cmds, cmd)
+		m.logView, cmd = m.logView.Update(msg)
+		cmds = append(cmds, cmd)
+	}
 
 	return m, tea.Batch(cmds...)
 }
@@ -250,6 +279,8 @@ func (m *tuiModel) resize() {
 	m.chatView.Height = viewportHeight - 2
 	m.logView.Width = maxInt(1, m.logPaneWidth-2)
 	m.logView.Height = viewportHeight - 2
+	m.debugView.Width = maxInt(1, m.width-2)
+	m.debugView.Height = viewportHeight - 2
 	m.input.SetWidth(maxInt(1, m.width-2))
 	m.input.SetHeight(inputHeight)
 	m.refreshViews()
@@ -364,6 +395,7 @@ func (m *tuiModel) resizeFromDividerX(x int) {
 func (m *tuiModel) refreshViews() {
 	m.refreshChat()
 	m.refreshLogs()
+	m.refreshDebug()
 }
 
 func (m *tuiModel) refreshChat() {
@@ -388,6 +420,10 @@ func (m *tuiModel) refreshLogs() {
 	}
 	m.logView.SetContent(content)
 	m.logView.GotoBottom()
+}
+
+func (m *tuiModel) refreshDebug() {
+	m.debugView.SetContent(m.renderDebug())
 }
 
 func (m tuiModel) renderMessage(message anthropic.MessageParam) string {
@@ -421,6 +457,76 @@ func (m tuiModel) renderMessage(message anthropic.MessageParam) string {
 	}
 }
 
+func (m tuiModel) renderDebug() string {
+	var sections []string
+	sections = append(sections, "Runtime")
+	sections = append(sections, m.renderRuntimeDebug())
+	sections = append(sections, "")
+	sections = append(sections, "Messages")
+	sections = append(sections, marshalDebugJSON(m.history))
+	return strings.Join(sections, "\n")
+}
+
+func (m tuiModel) renderRuntimeDebug() string {
+	hookCounts := make(map[string]int)
+	for event, callbacks := range m.rt.hooks {
+		hookCounts[string(event)] = len(callbacks)
+	}
+
+	moduleIDs := []string{}
+	if m.rt.modules != nil {
+		for _, module := range m.rt.modules.modules {
+			moduleIDs = append(moduleIDs, module.ID())
+		}
+	}
+
+	backgroundJobs := []backgroundJob{}
+	if m.rt.background != nil {
+		backgroundJobs = m.rt.background.list()
+	}
+
+	snapshot := map[string]any{
+		"status":            m.status,
+		"running":           m.running,
+		"approving":         m.approving,
+		"activeTab":         m.activeTabName(),
+		"messageCount":      len(m.history),
+		"logCount":          len(m.logs),
+		"currentTodos":      m.rt.currentTodos,
+		"roundsSinceTodo":   m.rt.roundsSinceTodo,
+		"memoryTurns":       m.rt.memoryTurns,
+		"promptCacheKey":    m.rt.promptCache.contextKey,
+		"promptCacheLength": len(m.rt.promptCache.prompt),
+		"recovery": map[string]any{
+			"model":                 m.rt.recovery.model,
+			"maxTokens":             m.rt.recovery.maxTokens,
+			"escalatedMaxTokens":    m.rt.recovery.escalatedMaxTokens,
+			"retries":               m.rt.recovery.retries,
+			"maxTokenContinuations": m.rt.recovery.maxTokenContinuations,
+		},
+		"config":         m.rt.config,
+		"hooks":          hookCounts,
+		"modules":        moduleIDs,
+		"backgroundJobs": backgroundJobs,
+	}
+	return marshalDebugJSON(snapshot)
+}
+
+func (m tuiModel) activeTabName() string {
+	if m.activeTab == tuiTabDebug {
+		return "debug"
+	}
+	return "main"
+}
+
+func marshalDebugJSON(value any) string {
+	raw, err := json.MarshalIndent(value, "", "  ")
+	if err != nil {
+		return fmt.Sprintf("Error: %v", err)
+	}
+	return string(raw)
+}
+
 // View 每次状态变化后重新渲染整屏；Bubble Tea 会负责 diff 和绘制。
 func (m tuiModel) View() string {
 	status := m.status
@@ -435,16 +541,23 @@ func (m tuiModel) View() string {
 		lipgloss.Top,
 		m.styles.title.Render("go_agent"),
 		" ",
+		m.styles.help.Render("[1 对话] [2 Debug]"),
+		" ",
 		m.styles.help.Render(status),
 	)
-	help := m.styles.help.Render("Ctrl+S 发送 | Enter 换行 | 拖动中线调整宽度 | Ctrl+C 退出")
+	help := m.styles.help.Render("1 对话 | 2 Debug | Ctrl+S 发送 | Enter 换行 | 拖动中线调整宽度 | Ctrl+C 退出")
 	if m.approving {
 		help = m.styles.warn.Render("权限确认中：按 y 允许，按 n 拒绝")
 	}
 
-	chatPane := m.renderPane("对话", m.chatView.View(), m.chatView.Width+2, m.chatView.Height+2)
-	logPane := m.renderPane("日志", m.logView.View(), m.logView.Width+2, m.logView.Height+2)
-	body := lipgloss.JoinHorizontal(lipgloss.Top, chatPane, m.renderDivider(m.chatView.Height+2), logPane)
+	body := ""
+	if m.activeTab == tuiTabDebug {
+		body = m.renderPane("Debug", m.debugView.View(), m.debugView.Width+2, m.debugView.Height+2)
+	} else {
+		chatPane := m.renderPane("对话", m.chatView.View(), m.chatView.Width+2, m.chatView.Height+2)
+		logPane := m.renderPane("日志", m.logView.View(), m.logView.Width+2, m.logView.Height+2)
+		body = lipgloss.JoinHorizontal(lipgloss.Top, chatPane, m.renderDivider(m.chatView.Height+2), logPane)
+	}
 
 	return strings.Join([]string{
 		header,
