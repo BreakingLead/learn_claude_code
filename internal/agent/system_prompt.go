@@ -22,6 +22,10 @@ type promptContext struct {
 	MemoryBlocks  []contextBlock
 }
 
+// a section in the system prompt
+// # $Name
+// Source : $Path
+// $Content
 type contextBlock struct {
 	Name    string
 	Path    string
@@ -160,9 +164,8 @@ func (rt *agentRuntime) readContextBlocks(candidates []struct {
 func assembleSystemPrompt(ctx promptContext) string {
 	var sections []string
 	sections = append(sections,
-		fmt.Sprintf("You are a coding agent working in %s.", ctx.Workdir),
+		fmt.Sprintf("You are a coding agent working in `%s` directory.", ctx.Workdir),
 		fmt.Sprintf("Model: %s.", ctx.Model),
-		"Use explicit runtime state. Do not introduce package-level mutable state for agent behavior.",
 		"Available tools: "+strings.Join(ctx.ToolNames, ", "),
 		"Skills available:\n"+listSkills(ctx.Skills),
 	)
