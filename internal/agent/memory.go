@@ -6,7 +6,7 @@ package agent
 //
 // 数据布局：
 //   - .agents/.memory/MEMORY.md 是索引，方便人读和 system prompt 按需加载。
-//   - .agents/.memory/*.md 是单条记忆，使用 YAML frontmatter 保存 id、title、tags、summary。
+//   - .agents/.memory/*.md 是单条记忆，使用 YAML frontmatter 保存 id、type、title、tags、summary。
 //
 // 运行流程：
 //   1. 每轮开始前，用当前用户请求检索相关记忆并注入一条内部 <memory> 消息。
@@ -31,8 +31,16 @@ import (
 	"github.com/anthropics/anthropic-sdk-go"
 )
 
+const (
+	memoryTypeUser      = "user"      // 用户画像：角色、偏好、知识水平。
+	memoryTypeFeedback  = "feedback"  // 行为反馈：该做什么、不该做什么。
+	memoryTypeProject   = "project"   // 项目动态：在做什么、截止日期、协作信息。
+	memoryTypeReference = "reference" // 外部指针：哪里能找到什么信息。
+)
+
 type memoryRecord struct {
 	ID      string
+	Type    string
 	Title   string
 	Tags    []string
 	Summary string
@@ -42,6 +50,7 @@ type memoryRecord struct {
 
 type memoryCandidate struct {
 	Title   string   `json:"title"`
+	Type    string   `json:"type"`
 	Tags    []string `json:"tags"`
 	Summary string   `json:"summary"`
 	Content string   `json:"content"`
@@ -58,7 +67,7 @@ func (rt *agentRuntime) injectRelevantMemories(messages *[]anthropic.MessagePara
 	lines = append(lines, "<memory>")
 	lines = append(lines, "Relevant persistent memories:")
 	for _, memory := range memories {
-		lines = append(lines, fmt.Sprintf("- %s: %s\n%s", memory.Title, memory.Summary, memory.Content))
+		lines = append(lines, fmt.Sprintf("- [%s] %s: %s\n%s", memory.Type, memory.Title, memory.Summary, memory.Content))
 	}
 	lines = append(lines, "</memory>")
 	*messages = append(*messages, anthropic.NewUserMessage(anthropic.NewTextBlock(strings.Join(lines, "\n"))))
@@ -96,6 +105,7 @@ func (rt *agentRuntime) relevantMemories(query string, limit int) []memoryRecord
 	for _, memory := range memories {
 		haystack := strings.ToLower(strings.Join([]string{
 			memory.Title,
+			memory.Type,
 			strings.Join(memory.Tags, " "),
 			memory.Summary,
 			memory.Content,
@@ -182,12 +192,29 @@ func parseMemoryRecord(path string, raw string) (memoryRecord, bool) {
 	}
 	return memoryRecord{
 		ID:      strings.TrimSpace(meta["id"]),
+		Type:    normalizeMemoryType(meta["type"]),
 		Title:   title,
 		Tags:    splitTags(meta["tags"]),
 		Summary: strings.TrimSpace(meta["summary"]),
 		Content: content,
 		Path:    path,
 	}, true
+}
+
+// normalizeMemoryType 将输入归一化为受支持的记忆类型，空值兼容为 project。
+func normalizeMemoryType(raw string) string {
+	switch strings.TrimSpace(strings.ToLower(raw)) {
+	case memoryTypeUser:
+		return memoryTypeUser
+	case memoryTypeFeedback:
+		return memoryTypeFeedback
+	case memoryTypeProject, "":
+		return memoryTypeProject
+	case memoryTypeReference:
+		return memoryTypeReference
+	default:
+		return memoryTypeProject
+	}
 }
 
 // splitTags 解析 frontmatter 中简化格式的 tags 字段。
@@ -209,7 +236,7 @@ func splitTags(raw string) []string {
 func (rt *agentRuntime) extractMemories(ctx context.Context, client anthropic.Client, messages []anthropic.MessageParam) {
 	candidates, err := rt.proposeMemories(ctx, client, messages)
 	if err != nil {
-		rt.emitLine("[memory] extraction skipped: %v", err)
+		rt.emitLine("[memory] error, extraction skipped: %v", err)
 		return
 	}
 	written := 0
@@ -238,8 +265,10 @@ func (rt *agentRuntime) proposeMemories(ctx context.Context, client anthropic.Cl
 		return nil, nil
 	}
 
-	prompt := "Extract durable user/project memories from this coding-agent conversation.\n" +
-		"Return JSON only: an array of objects with title, tags, summary, content.\n" +
+	prompt := "Extract durable memories from this coding-agent conversation.\n" +
+		"Return JSON only: an array of objects with type, title, tags, summary, content.\n" +
+		"Allowed type values: user, feedback, project, reference.\n" +
+		"Use user for user profile/preference/knowledge level, feedback for behavior rules, project for project status/collaboration, and reference for external pointers.\n" +
 		"Only include stable preferences, project facts, decisions, or constraints worth reusing later.\n" +
 		"Return [] if there is nothing worth remembering.\n\n" + transcript
 
@@ -328,8 +357,10 @@ func (rt *agentRuntime) writeMemory(candidate memoryCandidate) bool {
 	if err := os.MkdirAll(rt.config.MemoryDir, 0o755); err != nil {
 		return false
 	}
-	body := fmt.Sprintf("---\nid: %s\ntitle: %q\ntags: [%s]\nsummary: %q\ncreated: %s\n---\n\n%s\n",
+	memoryType := normalizeMemoryType(candidate.Type)
+	body := fmt.Sprintf("---\nid: %s\ntype: %s\ntitle: %q\ntags: [%s]\nsummary: %q\ncreated: %s\n---\n\n%s\n",
 		id,
+		memoryType,
 		title,
 		formatTags(candidate.Tags),
 		strings.TrimSpace(candidate.Summary),
@@ -374,7 +405,7 @@ func (rt *agentRuntime) rebuildMemoryIndex() {
 			if err != nil {
 				rel = filepath.Base(record.Path)
 			}
-			lines = append(lines, fmt.Sprintf("- [%s](%s): %s", record.Title, rel, record.Summary))
+			lines = append(lines, fmt.Sprintf("- %s [%s](%s): %s", record.Type, record.Title, rel, record.Summary))
 		}
 	}
 	_ = os.WriteFile(rt.config.MemoryIndex, []byte(strings.Join(lines, "\n")+"\n"), 0o644)
