@@ -177,6 +177,9 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
+		if isLeakedMouseReportKey(msg) {
+			return m, nil
+		}
 		switch {
 		case msg.String() == "1":
 			m.activeTab = tuiTabMain
@@ -240,6 +243,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case !m.approving:
 			var cmd tea.Cmd
 			m.input, cmd = m.input.Update(msg)
+			m.cleanInputEscapeReports()
 			cmds = append(cmds, cmd)
 		}
 
@@ -338,6 +342,69 @@ func (m *tuiModel) completeSlashCommand() bool {
 	}
 	m.input.SetValue(candidates[0].Usage + " ")
 	return true
+}
+
+func (m *tuiModel) cleanInputEscapeReports() {
+	cleaned := stripSGRMouseReports(m.input.Value())
+	if cleaned != m.input.Value() {
+		m.input.SetValue(cleaned)
+	}
+}
+
+func isLeakedMouseReportKey(msg tea.KeyMsg) bool {
+	key := tea.Key(msg)
+	if key.Type == tea.KeyRunes {
+		return isSGRMouseReport(string(key.Runes))
+	}
+	return isSGRMouseReport(msg.String())
+}
+
+func stripSGRMouseReports(text string) string {
+	var cleaned strings.Builder
+	for i := 0; i < len(text); {
+		if end, ok := sgrMouseReportEnd(text, i); ok {
+			i = end
+			continue
+		}
+		cleaned.WriteByte(text[i])
+		i++
+	}
+	return cleaned.String()
+}
+
+func isSGRMouseReport(text string) bool {
+	end, ok := sgrMouseReportEnd(text, 0)
+	return ok && end == len(text)
+}
+
+func sgrMouseReportEnd(text string, start int) (int, bool) {
+	i := start
+	if i < len(text) && text[i] == '\x1b' {
+		i++
+	}
+	if i+2 >= len(text) || text[i] != '[' || text[i+1] != '<' {
+		return 0, false
+	}
+	i += 2
+	for part := 0; part < 3; part++ {
+		partStart := i
+		for i < len(text) && text[i] >= '0' && text[i] <= '9' {
+			i++
+		}
+		if partStart == i {
+			return 0, false
+		}
+		if part < 2 {
+			if i >= len(text) || text[i] != ';' {
+				return 0, false
+			}
+			i++
+		}
+	}
+	if i >= len(text) || (text[i] != 'M' && text[i] != 'm') {
+		return 0, false
+	}
+	return i + 1, true
 }
 
 func (m tuiModel) chatPaneWidth() int {
@@ -562,16 +629,17 @@ func (m tuiModel) renderMessage(message anthropic.MessageParam) string {
 	case "user":
 		return m.styles.user.Render("You") + "\n" + body
 	case "assistant":
-		return m.styles.ai.Render("Agent") + "\n" + m.renderMarkdown(body)
+		return m.styles.ai.Render("Agent") + "\n" + m.renderMarkdown(body, m.chatView.Width-2)
 	default:
 		return body
 	}
 }
 
-func (m tuiModel) renderMarkdown(content string) string {
-	width := maxInt(20, m.chatView.Width-2)
+func (m tuiModel) renderMarkdown(content string, wrapWidth int) string {
+	width := maxInt(20, wrapWidth)
 	renderer, err := glamour.NewTermRenderer(
-		glamour.WithAutoStyle(),
+		// 固定主题避免 WithAutoStyle 触发 OSC 11 背景色查询；查询响应可能漏进 textarea。
+		glamour.WithStandardStyle("dark"),
 		glamour.WithWordWrap(width),
 	)
 	if err != nil {
@@ -590,7 +658,7 @@ func (m tuiModel) renderDebug() string {
 	sections = append(sections, highlightCode(m.renderRuntimeDebug(), "json"))
 	sections = append(sections, "")
 	sections = append(sections, "System Prompt")
-	sections = append(sections, m.renderCurrentSystemPrompt())
+	sections = append(sections, m.renderMarkdown(m.renderCurrentSystemPrompt(), m.debugView.Width-2))
 	sections = append(sections, "")
 	sections = append(sections, "Messages")
 	sections = append(sections, highlightCode(marshalDebugJSON(m.history), "json"))

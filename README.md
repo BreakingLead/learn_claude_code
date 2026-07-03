@@ -1,13 +1,14 @@
-# Go Agent — 设计文档
+# Bee Agent — 设计文档
 
-基于 Anthropic 官方 Go SDK (`github.com/anthropics/anthropic-sdk-go`) 实现的编码代理（coding agent），从 Python 版 `s08_context_compact` 迁移而来。
+基于 Anthropic 官方 Go SDK (`github.com/anthropics/anthropic-sdk-go`) 实现的agent.
 
 ## 架构概览
 
 ```
 cmd/bee-agent/      CLI 入口
 internal/agent/     agent 实现，只供本项目内部使用
-  main.go           REPL 入口 + agentLoop 核心循环
+  main.go           REPL 入口 + 主 agent 薄包装
+  agent_runner.go   agent/subagent 统一执行状态机与 agentSpec
   runtime.go        显式运行时状态、配置、hooks、UI 事件、prompt 缓存
   module.go         内部模块共通 API、moduleManager、prompt block 收集
   constants.go      环境变量读取、终端颜色辅助
@@ -20,7 +21,7 @@ internal/agent/     agent 实现，只供本项目内部使用
   task_system.go    持久任务：维护 .agents/.tasks/*.json、依赖检查和 TASKS.md 索引
   background.go     后台命令：启动后台 bash 并注入完成通知
   todo.go           任务列表管理
-  subagent.go       子 agent 生成（独立对话、30 轮上限）
+  subagent.go       子 agent 生成（独立消息、受限工具、30 轮上限）
   skills.go         技能扫描与加载（.agents/skills/）
   system_prompt.go  系统提示词上下文收集、缓存与组装
 ```
@@ -51,9 +52,11 @@ go run ./cmd/bee-agent
 ## 核心流程
 
 ```
-main() → REPL 读取用户输入
+main() → TUI 读取用户输入
   ↓
 agentLoop(messages)
+  ├── mainAgentSpec()           # 主 agent 能力配置
+  └── runAgent(spec, messages)  # agent/subagent 共用状态机
   ├── getSystemPrompt()         # 由 promptContext 组装并按 context key 缓存
   ├── injectRelevantMemories()   # 从 .agents/.memory/ 加载与当前请求相关的持久记忆
   ├── injectBackgroundNotifications()
@@ -66,6 +69,8 @@ agentLoop(messages)
   ├── extractMemories()          # 停止后提取稳定偏好/事实/决策
   └── StopReason != ToolUse → 触发 Stop 钩子 → 返回
 ```
+
+agent/subagent 的统一接口和设计记录见 `docs/agent-interface.md`。
 
 ## 持久记忆
 
@@ -129,10 +134,3 @@ agentLoop(messages)
 | L3 | toolResultBudget | 超 30KB 的结果落盘 |
 | L4 | compactHistory | 调用 LLM 生成摘要 |
 | 紧急 | reactiveCompact | API 400 时保存 + 摘要 + 保留尾部 |
-
-## 与 Python 版的差异
-
-- **依赖**：仅需 Go SDK + godotenv，无需 rich/loguru（用 ANSI 转义码替代）
-- **类型安全**：工具输入通过 `json.RawMessage` → struct 解析，编译期类型检查
-- **并发**：Go 天然支持，未来可并行执行多个工具调用
-- **错误处理**：Go 的显式错误处理替代 Python 的 try/except
