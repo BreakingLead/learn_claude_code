@@ -20,7 +20,8 @@ internal/agent/     agent 实现，只供本项目内部使用
   background.go     后台命令：启动后台 bash 并注入完成通知
   todo.go           任务列表管理
   subagent.go       子 agent 生成（独立对话、30 轮上限）
-  skills.go         技能扫描（.agents/skills/）与系统提示生成
+  skills.go         技能扫描与加载（.agents/skills/）
+  system_prompt.go  系统提示词上下文收集、缓存与组装
 ```
 
 ## 运行方式
