@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-// TestTaskCreateUpdateAndList 验证 .tasks/ 任务文件和 TASKS.md 索引会同步更新。
+// TestTaskCreateUpdateAndList 验证 .agents/.tasks/ 任务文件和 TASKS.md 索引会同步更新。
 func TestTaskCreateUpdateAndList(t *testing.T) {
 	workdir := t.TempDir()
 	rt := newAgentRuntime(testConfig(workdir), nil, nil)
@@ -35,7 +35,7 @@ func TestTaskCreateUpdateAndList(t *testing.T) {
 		t.Fatalf("unexpected update result: %s", updated)
 	}
 
-	index := readFile(t, filepath.Join(workdir, ".tasks", "TASKS.md"))
+	index := readFile(t, filepath.Join(workdir, ".agents", ".tasks", "TASKS.md"))
 	if !strings.Contains(index, "[completed] Implement recovery") {
 		t.Fatalf("unexpected task index:\n%s", index)
 	}

@@ -13,8 +13,8 @@ func TestRelevantMemoriesLoadsMatchingMarkdownRecords(t *testing.T) {
 	workdir := t.TempDir()
 	rt := newAgentRuntime(testConfig(workdir), nil, nil)
 
-	writeFile(t, filepath.Join(workdir, ".memory", "explicit-state.md"), "---\nid: explicit-state\ntitle: \"Explicit State\"\ntags: [go, runtime]\nsummary: \"Prefer explicit runtime state.\"\n---\n\nDo not use global variables for agent state.")
-	writeFile(t, filepath.Join(workdir, ".memory", "unrelated.md"), "---\nid: unrelated\ntitle: \"Other\"\ntags: [docs]\nsummary: \"Unrelated.\"\n---\n\nWrite short docs.")
+	writeFile(t, filepath.Join(workdir, ".agents", ".memory", "explicit-state.md"), "---\nid: explicit-state\ntitle: \"Explicit State\"\ntags: [go, runtime]\nsummary: \"Prefer explicit runtime state.\"\n---\n\nDo not use global variables for agent state.")
+	writeFile(t, filepath.Join(workdir, ".agents", ".memory", "unrelated.md"), "---\nid: unrelated\ntitle: \"Other\"\ntags: [docs]\nsummary: \"Unrelated.\"\n---\n\nWrite short docs.")
 
 	memories := rt.relevantMemories("How should this Go runtime handle global state?", 4)
 	if len(memories) != 1 {
@@ -38,7 +38,7 @@ func TestRebuildMemoryIndexWritesMemoryMarkdownIndex(t *testing.T) {
 	}
 
 	rt.rebuildMemoryIndex()
-	index := readFile(t, filepath.Join(workdir, ".memory", "MEMORY.md"))
+	index := readFile(t, filepath.Join(workdir, ".agents", ".memory", "MEMORY.md"))
 	if !strings.Contains(index, "# Memory Index") || !strings.Contains(index, "Runtime State") {
 		t.Fatalf("unexpected index:\n%s", index)
 	}

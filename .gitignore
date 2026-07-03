@@ -12,3 +12,6 @@ wheels/
 # Runtime agent state
 .memory/
 .tasks/
+.agents/compact/
+.agents/.memory/
+.agents/.tasks/

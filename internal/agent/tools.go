@@ -277,7 +277,7 @@ func buildTools() []anthropic.ToolUnionParam {
 		},
 		{
 			Name:        "task_create",
-			Description: anthropic.String("Create a persistent task in .tasks/."),
+			Description: anthropic.String("Create a persistent task in .agents/.tasks/."),
 			InputSchema: anthropic.ToolInputSchemaParam{
 				Properties: map[string]any{
 					"title":     map[string]any{"type": "string"},
@@ -304,7 +304,7 @@ func buildTools() []anthropic.ToolUnionParam {
 		},
 		{
 			Name:        "task_list",
-			Description: anthropic.String("List persistent tasks from .tasks/TASKS.md."),
+			Description: anthropic.String("List persistent tasks from .agents/.tasks/TASKS.md."),
 			InputSchema: anthropic.ToolInputSchemaParam{
 				Properties: map[string]any{},
 			},

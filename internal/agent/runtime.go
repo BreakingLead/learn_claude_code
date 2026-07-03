@@ -61,7 +61,7 @@ func newAgentConfig() (agentConfig, error) {
 	if err != nil {
 		return agentConfig{}, err
 	}
-	compactDir := filepath.Join(workdir, ".agent_state", "compact")
+	compactDir := filepath.Join(workdir, ".agents", "compact")
 	return agentConfig{
 		Model:                 getEnvOr("MODEL", "deepseek-v4-flash"),
 		FallbackModel:         getEnvOr("FALLBACK_MODEL", "deepseek-v4-flash"),
@@ -69,10 +69,10 @@ func newAgentConfig() (agentConfig, error) {
 		CompactDir:            compactDir,
 		ToolResultsDir:        filepath.Join(compactDir, "tool_results"),
 		TranscriptDir:         filepath.Join(compactDir, "transcripts"),
-		MemoryDir:             filepath.Join(workdir, ".memory"),
-		MemoryIndex:           filepath.Join(workdir, ".memory", "MEMORY.md"),
-		TaskDir:               filepath.Join(workdir, ".tasks"),
-		TaskIndex:             filepath.Join(workdir, ".tasks", "TASKS.md"),
+		MemoryDir:             filepath.Join(workdir, ".agents", ".memory"),
+		MemoryIndex:           filepath.Join(workdir, ".agents", ".memory", "MEMORY.md"),
+		TaskDir:               filepath.Join(workdir, ".agents", ".tasks"),
+		TaskIndex:             filepath.Join(workdir, ".agents", ".tasks", "TASKS.md"),
 		DefaultTokens:         8000,
 		EscalatedTokens:       16000,
 		MaxRecoveryRetries:    3,

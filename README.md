@@ -16,7 +16,7 @@ internal/agent/     agent 实现，只供本项目内部使用
   compact.go        四层上下文压缩：snip → micro → persist → LLM 摘要
   memory.go         持久记忆：加载相关记忆、提取新记忆、维护 MEMORY.md 索引
   recovery.go       错误恢复：context overflow、max_tokens、rate limit、overload
-  task_system.go    持久任务：维护 .tasks/ 和 TASKS.md 索引
+  task_system.go    持久任务：维护 .agents/.tasks/ 和 TASKS.md 索引
   background.go     后台命令：启动后台 bash 并注入完成通知
   todo.go           任务列表管理
   subagent.go       子 agent 生成（独立对话、30 轮上限）
@@ -48,7 +48,7 @@ main() → REPL 读取用户输入
   ↓
 agentLoop(messages)
   ├── getSystemPrompt()         # 由 promptContext 组装并按 context key 缓存
-  ├── injectRelevantMemories()   # 从 .memory/ 加载与当前请求相关的持久记忆
+  ├── injectRelevantMemories()   # 从 .agents/.memory/ 加载与当前请求相关的持久记忆
   ├── injectBackgroundNotifications()
   ├── maybeCompactHistory()     # 自动上下文压缩
   ├── callModelWithRecovery()   # 调用 API 并处理可恢复错误
@@ -62,10 +62,10 @@ agentLoop(messages)
 
 ## 持久记忆
 
-`.memory/` 保存跨会话记忆：
+`.agents/.memory/` 保存跨会话记忆：
 
 ```text
-.memory/
+.agents/.memory/
 ├── MEMORY.md        # 记忆索引
 └── *.md             # 单条记忆，包含 YAML frontmatter
 ```
@@ -74,10 +74,10 @@ agentLoop(messages)
 
 ## 持久任务与后台命令
 
-`.tasks/` 保存跨会话任务图：
+`.agents/.tasks/` 保存跨会话任务图：
 
 ```text
-.tasks/
+.agents/.tasks/
 ├── TASKS.md
 └── *.md
 ```

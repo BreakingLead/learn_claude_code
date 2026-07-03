@@ -2,11 +2,11 @@ package agent
 
 // 设计说明：
 // 这个文件实现跨会话持久记忆，和上下文压缩不同。压缩只让当前会话继续跑；
-// 记忆则把稳定的用户偏好、项目事实、决策和约束写入 .memory/，供后续会话复用。
+// 记忆则把稳定的用户偏好、项目事实、决策和约束写入 .agents/.memory/，供后续会话复用。
 //
 // 数据布局：
-//   - .memory/MEMORY.md 是索引，方便人读和 system prompt 按需加载。
-//   - .memory/*.md 是单条记忆，使用 YAML frontmatter 保存 id、title、tags、summary。
+//   - .agents/.memory/MEMORY.md 是索引，方便人读和 system prompt 按需加载。
+//   - .agents/.memory/*.md 是单条记忆，使用 YAML frontmatter 保存 id、title、tags、summary。
 //
 // 运行流程：
 //   1. 每轮开始前，用当前用户请求检索相关记忆并注入一条内部 <memory> 消息。
@@ -141,7 +141,7 @@ func keywordSet(text string) map[string]struct{} {
 	return result
 }
 
-// loadMemoryRecords 读取 .memory/ 下除 MEMORY.md 外的所有单条记忆文件。
+// loadMemoryRecords 读取 .agents/.memory/ 下除 MEMORY.md 外的所有单条记忆文件。
 func (rt *agentRuntime) loadMemoryRecords() []memoryRecord {
 	entries, err := os.ReadDir(rt.config.MemoryDir)
 	if err != nil {
@@ -357,7 +357,7 @@ func formatTags(tags []string) string {
 	return strings.Join(quoted, ", ")
 }
 
-// rebuildMemoryIndex 根据单条记忆文件重建 .memory/MEMORY.md 索引。
+// rebuildMemoryIndex 根据单条记忆文件重建 .agents/.memory/MEMORY.md 索引。
 func (rt *agentRuntime) rebuildMemoryIndex() {
 	records := rt.loadMemoryRecords()
 	if err := os.MkdirAll(rt.config.MemoryDir, 0o755); err != nil {

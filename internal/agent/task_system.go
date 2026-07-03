@@ -2,11 +2,11 @@ package agent
 
 // 模块说明：
 // 这个文件实现跨会话任务系统。它和 todo_write 不同：todo_write 是当前轮
-// 的短期执行清单；.tasks/ 是长期任务图，记录任务、父子关系、状态和索引。
+// 的短期执行清单；.agents/.tasks/ 是长期任务图，记录任务、父子关系、状态和索引。
 //
 // 数据布局：
-//   - .tasks/TASKS.md 是任务索引，方便人读和 system prompt 按需加载。
-//   - .tasks/*.md 是单个任务文件，使用 frontmatter 保存 id、title、status、parent_id。
+//   - .agents/.tasks/TASKS.md 是任务索引，方便人读和 system prompt 按需加载。
+//   - .agents/.tasks/*.md 是单个任务文件，使用 frontmatter 保存 id、title、status、parent_id。
 //
 // 状态边界：
 // 所有路径来自 agentConfig，所有工具函数挂在 agentRuntime 上，不使用包级变量。
@@ -128,7 +128,7 @@ func (rt *agentRuntime) loadTask(id string) (taskRecord, bool) {
 	return task, ok
 }
 
-// loadTaskRecords 读取 .tasks/ 下除 TASKS.md 外的所有任务文件。
+// loadTaskRecords 读取 .agents/.tasks/ 下除 TASKS.md 外的所有任务文件。
 func (rt *agentRuntime) loadTaskRecords() []taskRecord {
 	entries, err := os.ReadDir(rt.config.TaskDir)
 	if err != nil {
@@ -199,7 +199,7 @@ func (rt *agentRuntime) writeTask(task taskRecord) error {
 	return os.WriteFile(path, []byte(body), 0o644)
 }
 
-// rebuildTaskIndex 根据任务文件重建 .tasks/TASKS.md。
+// rebuildTaskIndex 根据任务文件重建 .agents/.tasks/TASKS.md。
 func (rt *agentRuntime) rebuildTaskIndex() {
 	tasks := rt.loadTaskRecords()
 	if err := os.MkdirAll(rt.config.TaskDir, 0o755); err != nil {

@@ -201,7 +201,7 @@ func (rt *agentRuntime) loadMemoryBlocks() []contextBlock {
 		name string
 		path string
 	}{
-		{name: "Memory", path: filepath.Join(rt.config.Workdir, ".memory", "MEMORY.md")},
+		{name: "Memory", path: rt.config.MemoryIndex},
 	}
 	return rt.readContextBlocks(candidates, 6000)
 }

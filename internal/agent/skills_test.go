@@ -11,7 +11,7 @@ func TestGetSystemPromptIncludesMemoryAndCachesByContext(t *testing.T) {
 	workdir := t.TempDir()
 	writeFile(t, filepath.Join(workdir, "AGENTS.md"), "# Repository Guidelines\n\nUse explicit runtime state.")
 	writeFile(t, filepath.Join(workdir, "README.md"), "# Project\n\nRun with go run ./cmd/go-agent.")
-	writeFile(t, filepath.Join(workdir, ".memory", "MEMORY.md"), "# Memory Index\n\n- Prefer explicit state.")
+	writeFile(t, filepath.Join(workdir, ".agents", ".memory", "MEMORY.md"), "# Memory Index\n\n- Prefer explicit state.")
 	writeFile(t, filepath.Join(workdir, ".agents", "skills", "demo", "SKILL.md"), "---\nname: demo\ndescription: Demo skill\n---\nDetails")
 
 	rt := newAgentRuntime(testConfig(workdir), nil, nil)
@@ -21,7 +21,7 @@ func TestGetSystemPromptIncludesMemoryAndCachesByContext(t *testing.T) {
 		t.Fatalf("prompt missing AGENTS.md project context: %s", prompt)
 	}
 	if !strings.Contains(prompt, "Memory sections:") || !strings.Contains(prompt, "Prefer explicit state.") {
-		t.Fatalf("prompt missing .memory/MEMORY.md section: %s", prompt)
+		t.Fatalf("prompt missing .agents/.memory/MEMORY.md section: %s", prompt)
 	}
 	if !strings.Contains(prompt, "**demo**: Demo skill") {
 		t.Fatalf("prompt missing skill catalog: %s", prompt)
@@ -35,7 +35,7 @@ func TestGetSystemPromptIncludesMemoryAndCachesByContext(t *testing.T) {
 		t.Fatalf("expected stable context key for same prompt context")
 	}
 
-	writeFile(t, filepath.Join(workdir, ".memory", "MEMORY.md"), "# Memory Index\n\nChanged memory.")
+	writeFile(t, filepath.Join(workdir, ".agents", ".memory", "MEMORY.md"), "# Memory Index\n\nChanged memory.")
 	updated := rt.getSystemPrompt([]string{"bash", "read_file"})
 	if updated == prompt {
 		t.Fatalf("expected prompt to refresh after memory content changes")
@@ -47,7 +47,7 @@ func TestGetSystemPromptIncludesMemoryAndCachesByContext(t *testing.T) {
 
 func TestGetSystemPromptEmitsAssembledThenCacheHit(t *testing.T) {
 	workdir := t.TempDir()
-	writeFile(t, filepath.Join(workdir, ".memory", "MEMORY.md"), "# Memory Index\n\n- Cache this.")
+	writeFile(t, filepath.Join(workdir, ".agents", ".memory", "MEMORY.md"), "# Memory Index\n\n- Cache this.")
 	events := make(chan uiEvent, 4)
 	rt := newAgentRuntime(testConfig(workdir), events, nil)
 
@@ -68,13 +68,13 @@ func testConfig(workdir string) agentConfig {
 	return agentConfig{
 		Model:          "test-model",
 		Workdir:        workdir,
-		CompactDir:     filepath.Join(workdir, ".agent_state", "compact"),
-		ToolResultsDir: filepath.Join(workdir, ".agent_state", "compact", "tool_results"),
-		TranscriptDir:  filepath.Join(workdir, ".agent_state", "compact", "transcripts"),
-		MemoryDir:      filepath.Join(workdir, ".memory"),
-		MemoryIndex:    filepath.Join(workdir, ".memory", "MEMORY.md"),
-		TaskDir:        filepath.Join(workdir, ".tasks"),
-		TaskIndex:      filepath.Join(workdir, ".tasks", "TASKS.md"),
+		CompactDir:     filepath.Join(workdir, ".agents", "compact"),
+		ToolResultsDir: filepath.Join(workdir, ".agents", "compact", "tool_results"),
+		TranscriptDir:  filepath.Join(workdir, ".agents", "compact", "transcripts"),
+		MemoryDir:      filepath.Join(workdir, ".agents", ".memory"),
+		MemoryIndex:    filepath.Join(workdir, ".agents", ".memory", "MEMORY.md"),
+		TaskDir:        filepath.Join(workdir, ".agents", ".tasks"),
+		TaskIndex:      filepath.Join(workdir, ".agents", ".tasks", "TASKS.md"),
 	}
 }
 
