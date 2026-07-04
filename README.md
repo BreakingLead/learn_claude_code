@@ -26,6 +26,8 @@ internal/agent/     agent 实现，只供本项目内部使用
   subagent.go       子 agent 生成（独立消息、受限工具、30 轮上限）
   skills.go         技能扫描与加载（.agents/skills/）
   system_prompt.go  系统提示词上下文收集、缓存与组装
+  messaging.go      消息平台中间层：Feishu/Telegram payload 与统一消息格式互转
+  coc.go            CoC 跑团工具：骰子、技能检定、对抗检定、San Check
 ```
 
 ## 运行方式
@@ -53,12 +55,13 @@ go run ./cmd/bee-agent
 
 ## Mode 配置
 
-`/mode` 查看当前可用模式，`/mode plan` 或 `/mode build` 切换模式。
+`/mode` 查看当前可用模式，`/mode plan`、`/mode build` 或 `/mode coc` 切换模式。
 
 内置模式：
 
 - `plan`: 规划模式，不暴露 `bash`、`write_file`、`edit_file` 等可写工具，倾向先分析方案。
 - `build`: 构建模式，使用当前启用模块贡献的完整工具集。
+- `coc`: Call of Cthulhu 跑团模式，注入守秘人提示词，只暴露跑团、消息和少量只读工具。
 
 可以在 `.agents/modes.json` 中添加自定义模式：
 
@@ -83,6 +86,26 @@ go run ./cmd/bee-agent
 ```
 
 `tools` 是允许列表；未设置时继承完整工具集。`disable_tools` 会从当前工具集中移除指定工具。也可以用 `BEE_AGENT_MODE=plan` 设置启动默认模式。
+
+## 消息平台中间层
+
+`messaging` 模块把外部平台 payload 统一为 `UnifiedMessage` 风格的数据：`platform`、`chat_id`、`sender_id`、`sender_name`、`text`、`message_type`、`timestamp`、`metadata`。当前内置 adapter：
+
+- `feishu`: 支持飞书事件回调文本消息归一化，并构造飞书文本 outbound payload。
+- `telegram`: 支持 Telegram update 文本消息归一化，并构造 Telegram sendMessage payload。
+
+相关工具：`messaging_platforms`、`messaging_normalize`、`messaging_build_outbound`。后续接入新平台时实现同样的 adapter 接口即可，agent 其它部分不需要依赖平台原始字段。
+
+## CoC 跑团模块
+
+`/mode coc` 会启用跑团提示词和常用工具：
+
+- `coc_roll_dice`: 掷骰表达式，如 `1d100`、`2d6+3`、`d3-1`。
+- `coc_skill_check`: CoC 7e D100 技能检定，支持奖励骰/惩罚骰。
+- `coc_opposed_check`: 对抗检定，先比较成功等级，再比较低点数。
+- `coc_sanity_check`: 理智检定，并根据成功/失败表达式计算 SAN 损失。
+
+工具输出 JSON，方便直接回传到 TUI、飞书或 Telegram。
 
 ## 核心流程
 

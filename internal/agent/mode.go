@@ -46,6 +46,7 @@ func newModeRegistry(path string, requested string, log func(format string, args
 	}
 	registry.register(builtinBuildMode())
 	registry.register(builtinPlanMode())
+	registry.register(builtinCoCMode())
 
 	defaultName := defaultModeName
 	if configDefault := registry.loadUserModes(path); configDefault != "" {
@@ -67,6 +68,22 @@ func builtinBuildMode() agentMode {
 		Description: "完整构建模式，可以读写文件并执行已启用模块工具。",
 		Prompt: "You are in build mode. Implement requested changes directly when the user asks for code changes. " +
 			"Use tools pragmatically, verify focused changes, and keep edits scoped.",
+	}
+}
+
+func builtinCoCMode() agentMode {
+	return agentMode{
+		Name:        "coc",
+		Description: "CoC 跑团模式，提供守秘人提示词和常用跑团工具。",
+		Prompt: "You are in Call of Cthulhu keeper mode. Keep mechanics explicit and separate from narration. " +
+			"Use CoC 7e success levels for D100 checks, ask for missing skill targets before rolling when needed, " +
+			"and keep horror narration tense, concise, and fair. Never invent player character stats if they are unknown.",
+		Tools: []string{
+			"read_file", "glob",
+			"coc_roll_dice", "coc_skill_check", "coc_opposed_check", "coc_sanity_check",
+			"messaging_platforms", "messaging_normalize", "messaging_build_outbound",
+			"team_send_message", "team_check_inbox",
+		},
 	}
 }
 

@@ -163,6 +163,8 @@ func (rt *agentRuntime) configuredModules() []Module {
 		&skillModule{rt: rt},
 		rt.todo,
 		&memoryContextModule{},
+		&messagingModule{},
+		&cocModule{},
 		&subagentModule{rt: rt},
 		&taskSystemModule{rt: rt},
 		&teamModule{rt: rt},
