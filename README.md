@@ -96,6 +96,27 @@ go run ./cmd/bee-agent
 
 相关工具：`messaging_platforms`、`messaging_normalize`、`messaging_build_outbound`。后续接入新平台时实现同样的 adapter 接口即可，agent 其它部分不需要依赖平台原始字段。
 
+### Telegram 接入
+
+第一版 Telegram connector 使用 long polling。启用后程序运行 Telegram 入口，不启动 TUI：
+
+```bash
+BEE_AGENT_TELEGRAM=1 \
+TELEGRAM_BOT_TOKEN=123456:xxx \
+TELEGRAM_ALLOWED_CHATS=-1001234567890 \
+BEE_AGENT_MODE=coc \
+go run ./cmd/bee-agent
+```
+
+可选配置：
+
+- `TELEGRAM_ALLOWED_CHATS`: 逗号分隔的 chat id 允许列表；为空时允许所有 chat。
+- `TELEGRAM_POLL_INTERVAL`: 轮询间隔，默认 `2s`。
+- `TELEGRAM_TIMEOUT`: Telegram long polling timeout，默认 `30s`。
+- `TELEGRAM_BASE_URL`: 测试或代理用 API base URL，默认 `https://api.telegram.org`。
+
+每个 Telegram chat 维护独立对话历史。收到 update 后会先归一化为统一消息，再交给 agent；agent 的最后回复通过 `sendMessage` 回到原 chat。
+
 ## CoC 跑团模块
 
 `/mode coc` 会启用跑团提示词和常用工具：

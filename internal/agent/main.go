@@ -27,6 +27,10 @@ func Run() {
 	}
 	client := anthropic.NewClient(opts...)
 	ctx := context.Background()
+	if truthyEnv("BEE_AGENT_TELEGRAM") {
+		runTelegram(ctx, client)
+		return
+	}
 
 	runTUI(ctx, client)
 }
