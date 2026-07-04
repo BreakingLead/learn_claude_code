@@ -62,7 +62,7 @@ func TestRuntimeSnapshotsComeFromModules(t *testing.T) {
 	rt := newAgentRuntime(testConfig(t.TempDir()), nil, nil)
 	snapshots := rt.modules.runtimeSnapshots()
 
-	for _, want := range []string{"project", "skills", "todo", "memory", "subagent", "task_system", "background", "cron"} {
+	for _, want := range []string{"project", "skills", "todo", "memory", "subagent", "task_system", "team", "background", "cron"} {
 		if _, ok := snapshots[want]; !ok {
 			t.Fatalf("missing module snapshot %q in %#v", want, snapshots)
 		}
@@ -77,6 +77,7 @@ func TestDisabledModulesRemoveToolsSnapshotsAndLifecycle(t *testing.T) {
 		"memory":      true,
 		"subagent":    true,
 		"task_system": true,
+		"team":        true,
 		"background":  true,
 		"cron":        true,
 	}
@@ -85,12 +86,12 @@ func TestDisabledModulesRemoveToolsSnapshotsAndLifecycle(t *testing.T) {
 	snapshots := rt.modules.runtimeSnapshots()
 	spec := rt.mainAgentSpec()
 
-	for _, disabledTool := range []string{"load_skill", "todo_write", "task", "task_create", "background_bash", "schedule_cron"} {
+	for _, disabledTool := range []string{"load_skill", "todo_write", "task", "task_create", "team_send_message", "background_bash", "schedule_cron"} {
 		if hasString(names, disabledTool) {
 			t.Fatalf("disabled module tool %q should not be exposed in %v", disabledTool, names)
 		}
 	}
-	for _, disabledModule := range []string{"skills", "todo", "memory", "subagent", "task_system", "background", "cron"} {
+	for _, disabledModule := range []string{"skills", "todo", "memory", "subagent", "task_system", "team", "background", "cron"} {
 		if _, ok := snapshots[disabledModule]; ok {
 			t.Fatalf("disabled module %q should not expose snapshot: %#v", disabledModule, snapshots)
 		}

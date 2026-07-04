@@ -21,6 +21,7 @@ internal/agent/     agent 实现，只供本项目内部使用
   task_system.go    持久任务：维护 .agents/.tasks/*.json、依赖检查和 TASKS.md 索引
   background.go     后台命令：启动后台 bash 并注入完成通知
   cron.go           定时调度：cron 表达式、持久任务、自动交付队列
+  team.go           多 agent 协作：JSONL 消息总线、协议状态、请求/响应匹配
   todo.go           todo 模块：todo_write 工具、当前任务列表、提醒 hook
   subagent.go       子 agent 生成（独立消息、受限工具、30 轮上限）
   skills.go         技能扫描与加载（.agents/skills/）
@@ -133,6 +134,19 @@ agent/subagent 的统一接口和设计记录见 `docs/agent-interface.md`。
 后台命令通过 `background_bash` 启动，`background_status` 查看单个 job，`background_list` 列出所有 job。后台 job 完成后会在下一次模型调用前注入 `<background>` 内部消息，并在右侧日志显示完成状态。
 
 定时任务通过 `schedule_cron` 注册五段式 cron 表达式，`list_crons` 查看，`cancel_cron` 取消。默认 durable 的任务写入 `.scheduled_tasks.json`，Agent 进程运行时每秒检查一次，到点后在空闲时自动注入 `[Scheduled] ...` 消息并启动一轮执行。
+
+## 多 Agent 协作
+
+`team` 模块使用 append-only JSONL 文件传递结构化消息：
+
+```text
+.agents/team/
+└── messages.jsonl   # sender、target、type、content、metadata
+```
+
+相关工具：`team_send_message`、`team_check_inbox`、`team_request_shutdown`、`team_request_plan_approval`、`team_respond_protocol`、`team_protocol_status`。
+
+协议请求会生成 `request_id` 并进入 `pending` 状态；响应消息通过相同 `request_id` 匹配，并按协议类型校验后更新为 `approved` 或 `rejected`。当前实现聚焦 Lead 侧协调和协议状态机，后续可在同一 JSONL 总线上扩展长期 teammate worker、idle loop 和执行门控。
 
 ## 错误恢复
 

@@ -30,6 +30,7 @@ type agentRuntime struct {
 	todo        *todoModule
 	background  *backgroundRegistry
 	cron        *cronScheduler
+	team        *teamRegistry
 	modes       *modeRegistry
 	promptCache promptCache
 	memoryTurns int
@@ -48,6 +49,8 @@ type agentConfig struct {
 	TaskDir               string
 	TaskIndex             string
 	ScheduledTasksPath    string
+	TeamDir               string
+	TeamMessagesPath      string
 	ModeConfigPath        string
 	DefaultTokens         int64
 	EscalatedTokens       int64
@@ -82,6 +85,8 @@ func newAgentConfig() (agentConfig, error) {
 		TaskDir:               filepath.Join(workdir, ".agents", ".tasks"),
 		TaskIndex:             filepath.Join(workdir, ".agents", ".tasks", "TASKS.md"),
 		ScheduledTasksPath:    filepath.Join(workdir, ".scheduled_tasks.json"),
+		TeamDir:               filepath.Join(workdir, ".agents", "team"),
+		TeamMessagesPath:      filepath.Join(workdir, ".agents", "team", "messages.jsonl"),
 		ModeConfigPath:        filepath.Join(workdir, ".agents", "modes.json"),
 		DefaultTokens:         8000,
 		EscalatedTokens:       16000,
@@ -114,6 +119,9 @@ func newAgentRuntime(config agentConfig, events chan<- uiEvent, approvals <-chan
 		if err := rt.cron.loadDurableJobs(); err != nil {
 			rt.emitLine("[cron] load durable jobs: %v", err)
 		}
+	}
+	if rt.moduleEnabled("team") {
+		rt.team = newTeamRegistry(config.TeamMessagesPath, rt.emitLine)
 	}
 	rt.recovery = newRecoveryState(config)
 	rt.modes = newModeRegistry(config.ModeConfigPath, os.Getenv("BEE_AGENT_MODE"), rt.emitLine)
@@ -157,6 +165,7 @@ func (rt *agentRuntime) configuredModules() []Module {
 		&memoryContextModule{},
 		&subagentModule{rt: rt},
 		&taskSystemModule{rt: rt},
+		&teamModule{rt: rt},
 		&backgroundModule{rt: rt},
 		&cronModule{rt: rt},
 	}
