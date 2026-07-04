@@ -15,3 +15,5 @@ wheels/
 .agents/compact/
 .agents/.memory/
 .agents/.tasks/
+
+exp/
