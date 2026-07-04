@@ -32,6 +32,8 @@ type agentRuntime struct {
 	cron        *cronScheduler
 	team        *teamRegistry
 	modes       *modeRegistry
+	sessions    *sessionStore
+	sessionID   string
 	promptCache promptCache
 	memoryTurns int
 	recovery    recoveryState
@@ -51,6 +53,7 @@ type agentConfig struct {
 	ScheduledTasksPath    string
 	TeamDir               string
 	TeamMessagesPath      string
+	SessionDir            string
 	ModeConfigPath        string
 	DefaultTokens         int64
 	EscalatedTokens       int64
@@ -87,6 +90,7 @@ func newAgentConfig() (agentConfig, error) {
 		ScheduledTasksPath:    filepath.Join(workdir, ".scheduled_tasks.json"),
 		TeamDir:               filepath.Join(workdir, ".agents", "team"),
 		TeamMessagesPath:      filepath.Join(workdir, ".agents", "team", "messages.jsonl"),
+		SessionDir:            filepath.Join(workdir, ".agents", "sessions"),
 		ModeConfigPath:        filepath.Join(workdir, ".agents", "modes.json"),
 		DefaultTokens:         8000,
 		EscalatedTokens:       16000,
@@ -125,6 +129,8 @@ func newAgentRuntime(config agentConfig, events chan<- uiEvent, approvals <-chan
 	}
 	rt.recovery = newRecoveryState(config)
 	rt.modes = newModeRegistry(config.ModeConfigPath, os.Getenv("BEE_AGENT_MODE"), rt.emitLine)
+	rt.sessions = newSessionStore(config.SessionDir)
+	rt.sessionID = rt.sessions.newID(time.Now())
 	rt.todo = &todoModule{}
 	rt.modules = newModuleManager(rt.configuredModules()...)
 	if err := rt.modules.init(ModuleContext{

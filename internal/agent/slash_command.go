@@ -3,7 +3,9 @@ package agent
 import (
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -45,6 +47,51 @@ func newSlashCommandRegistry() *slashCommandRegistry {
 		Handler: func(m *tuiModel, _ string) tea.Cmd {
 			m.history = nil
 			m.logs = append(m.logs, m.styles.log.Render("已清空对话历史"))
+			return nil
+		},
+	})
+	registry.register(slashCommand{
+		Name:        "new",
+		Usage:       "/new",
+		Description: "新建 session",
+		Handler: func(m *tuiModel, _ string) tea.Cmd {
+			old := ""
+			current := ""
+			if m.rt != nil {
+				old = m.rt.sessionID
+				m.rt.saveCurrentSession(m.history)
+				current = m.rt.startNewSession(time.Now())
+				m.rt.saveCurrentSession(nil)
+			}
+			m.history = nil
+			m.logs = append(m.logs, m.styles.log.Render(fmt.Sprintf("已新建 session：%s（上一 session：%s）", current, old)))
+			return nil
+		},
+	})
+	registry.register(slashCommand{
+		Name:        "resume",
+		Usage:       "/resume [id|number]",
+		Description: "列出或恢复 session",
+		Handler: func(m *tuiModel, args string) tea.Cmd {
+			if m.rt == nil || m.rt.sessions == nil {
+				m.logs = append(m.logs, m.styles.warn.Render("session store 未初始化"))
+				return nil
+			}
+			records := m.rt.sessions.list()
+			choice := strings.TrimSpace(args)
+			if choice == "" {
+				m.logs = append(m.logs, m.styles.log.Render(formatSessionList(records)))
+				return nil
+			}
+			selected := resolveSessionChoice(choice, records)
+			m.rt.saveCurrentSession(m.history)
+			messages, record, err := m.rt.resumeSession(selected)
+			if err != nil {
+				m.logs = append(m.logs, m.styles.warn.Render(fmt.Sprintf("恢复失败：%v", err)))
+				return nil
+			}
+			m.history = messages
+			m.logs = append(m.logs, m.styles.log.Render(fmt.Sprintf("已恢复 session：%s（%d messages）", record.ID, record.MessageCount)))
 			return nil
 		},
 	})
@@ -134,6 +181,30 @@ func (r *slashCommandRegistry) helpText() string {
 		lines = append(lines, fmt.Sprintf("  %-10s %s", command.Usage, command.Description))
 	}
 	return strings.Join(lines, "\n")
+}
+
+func formatSessionList(records []sessionRecord) string {
+	if len(records) == 0 {
+		return "没有可恢复的 session。"
+	}
+	lines := []string{"可恢复的 session："}
+	for i, record := range records {
+		updated := "unknown"
+		if !record.UpdatedAt.IsZero() {
+			updated = record.UpdatedAt.Format("2006-01-02 15:04")
+		}
+		lines = append(lines, fmt.Sprintf("  %d. %s  messages=%d  updated=%s  %s", i+1, record.ID, record.MessageCount, updated, record.Preview))
+	}
+	lines = append(lines, "使用 /resume 1 或 /resume <session-id> 恢复。")
+	return strings.Join(lines, "\n")
+}
+
+func resolveSessionChoice(choice string, records []sessionRecord) string {
+	choice = strings.TrimSpace(choice)
+	if n, err := strconv.Atoi(choice); err == nil && n >= 1 && n <= len(records) {
+		return records[n-1].ID
+	}
+	return choice
 }
 
 func parseSlashCommand(input string) (string, string, bool) {

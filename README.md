@@ -51,7 +51,23 @@ go run ./cmd/bee-agent
 | Ctrl+C | 退出 |
 | y / n | 权限确认时允许 / 拒绝工具调用 |
 
-输入框以 `/` 开头时会先按本地命令处理，不会发送给 agent。内置命令包括 `/help`、`/clear`、`/debug`、`/chat`、`/mode`、`/quit`。
+输入框以 `/` 开头时会先按本地命令处理，不会发送给 agent。内置命令包括 `/help`、`/clear`、`/new`、`/resume`、`/debug`、`/chat`、`/mode`、`/quit`。
+
+## Session 恢复
+
+TUI 会把当前对话保存到 `.agents/sessions/*.jsonl`。退出时终端会打印完整 session id：
+
+```text
+Session saved: sess_20260704_120000_a1b2c3
+```
+
+再次启动时，如果已有 session，会先在终端列出可恢复项；输入编号或完整 id 恢复，直接回车则新建。自动化场景可设置 `BEE_AGENT_RESUME_PROMPT=0` 跳过启动询问。
+
+TUI 内也可以切换：
+
+- `/new`: 保存当前 session，然后创建空的新 session。
+- `/resume`: 列出可恢复 session。
+- `/resume 1` 或 `/resume sess_...`: 保存当前 session，然后恢复目标 session。
 
 ## Mode 配置
 

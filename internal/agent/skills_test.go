@@ -108,6 +108,7 @@ func testConfig(workdir string) agentConfig {
 		ScheduledTasksPath: filepath.Join(workdir, ".scheduled_tasks.json"),
 		TeamDir:            filepath.Join(workdir, ".agents", "team"),
 		TeamMessagesPath:   filepath.Join(workdir, ".agents", "team", "messages.jsonl"),
+		SessionDir:         filepath.Join(workdir, ".agents", "sessions"),
 		ModeConfigPath:     filepath.Join(workdir, ".agents", "modes.json"),
 		BackgroundTimeout:  10 * time.Minute,
 	}

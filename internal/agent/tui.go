@@ -1,10 +1,12 @@
 package agent
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/alecthomas/chroma/v2/quick"
@@ -105,14 +107,23 @@ func runTUI(ctx context.Context, client anthropic.Client) {
 	}
 	rt := newAgentRuntime(config, events, approvals)
 	rt.startCronScheduler()
+	history := chooseInitialSession(rt)
 
-	p := tea.NewProgram(newTUIModel(ctx, client, rt, events, approvals), tea.WithAltScreen(), tea.WithMouseCellMotion())
-	if _, err := p.Run(); err != nil {
+	p := tea.NewProgram(newTUIModel(ctx, client, rt, events, approvals, history), tea.WithAltScreen(), tea.WithMouseCellMotion())
+	model, err := p.Run()
+	if err != nil {
 		fmt.Println(colorRed("TUI error: " + err.Error()))
+		return
+	}
+	if final, ok := model.(tuiModel); ok {
+		final.rt.saveCurrentSession(final.history)
+		fmt.Printf("Session saved: %s\n", final.rt.sessionID)
+	} else {
+		fmt.Printf("Session saved: %s\n", rt.sessionID)
 	}
 }
 
-func newTUIModel(ctx context.Context, client anthropic.Client, rt *agentRuntime, events chan uiEvent, approvals chan bool) tuiModel {
+func newTUIModel(ctx context.Context, client anthropic.Client, rt *agentRuntime, events chan uiEvent, approvals chan bool, history []anthropic.MessageParam) tuiModel {
 	chatView := viewport.New(56, 20)
 	chatView.SetContent("准备就绪。输入问题后按 Ctrl+S 发送，Ctrl+C 退出。")
 
@@ -133,6 +144,7 @@ func newTUIModel(ctx context.Context, client anthropic.Client, rt *agentRuntime,
 		client:       client,
 		rt:           rt,
 		styles:       newTUIStyles(),
+		history:      history,
 		chatView:     chatView,
 		logView:      logView,
 		debugView:    debugView,
@@ -142,6 +154,50 @@ func newTUIModel(ctx context.Context, client anthropic.Client, rt *agentRuntime,
 		approvals:    approvals,
 		logPaneWidth: 34,
 		status:       "ready",
+	}
+}
+
+func chooseInitialSession(rt *agentRuntime) []anthropic.MessageParam {
+	if rt == nil || rt.sessions == nil {
+		return nil
+	}
+	records := rt.sessions.list()
+	if len(records) == 0 || sessionResumePromptDisabled() {
+		_ = rt.sessions.saveSnapshot(rt.sessionID, nil)
+		fmt.Printf("New session: %s\n", rt.sessionID)
+		return nil
+	}
+	fmt.Println("Resume a session? Enter number, session id, or empty for new session:")
+	for i, record := range records {
+		fmt.Printf("%d. %s  messages=%d  updated=%s  %s\n", i+1, record.ID, record.MessageCount, record.UpdatedAt.Format("2006-01-02 15:04"), record.Preview)
+	}
+	fmt.Print("> ")
+	reader := bufio.NewReader(os.Stdin)
+	choice, _ := reader.ReadString('\n')
+	choice = strings.TrimSpace(choice)
+	if choice == "" {
+		_ = rt.sessions.saveSnapshot(rt.sessionID, nil)
+		fmt.Printf("New session: %s\n", rt.sessionID)
+		return nil
+	}
+	selected := resolveSessionChoice(choice, records)
+	messages, record, err := rt.resumeSession(selected)
+	if err != nil {
+		fmt.Printf("Resume failed: %v\n", err)
+		_ = rt.sessions.saveSnapshot(rt.sessionID, nil)
+		fmt.Printf("New session: %s\n", rt.sessionID)
+		return nil
+	}
+	fmt.Printf("Resumed session: %s (%d messages)\n", record.ID, record.MessageCount)
+	return messages
+}
+
+func sessionResumePromptDisabled() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("BEE_AGENT_RESUME_PROMPT"))) {
+	case "0", "false", "no", "off", "skip":
+		return true
+	default:
+		return false
 	}
 }
 
@@ -229,6 +285,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.rt.triggerHooks(EventUserPromptSubmit, query)
 			m.history = append(m.history, anthropic.NewUserMessage(anthropic.NewTextBlock(query)))
+			m.rt.saveCurrentSession(m.history)
 			m.input.Reset()
 			m.running = true
 			m.status = "thinking"
@@ -273,6 +330,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case agentDoneMsg:
 		m.history = msg.History
+		m.rt.saveCurrentSession(m.history)
 		m.running = false
 		m.status = "ready"
 		if cmd := m.startScheduledCronIfIdle(); cmd != nil {
@@ -701,6 +759,7 @@ func (m tuiModel) renderRuntimeDebug() string {
 
 	snapshot := map[string]any{
 		"status":            m.status,
+		"sessionID":         m.rt.sessionID,
 		"running":           m.running,
 		"approving":         m.approving,
 		"activeTab":         m.activeTabName(),
@@ -771,9 +830,11 @@ func (m tuiModel) View() string {
 		" ",
 		m.styles.help.Render("mode:"+m.rt.activeMode().Name),
 		" ",
+		m.styles.help.Render("session:"+shortSessionID(m.rt.sessionID)),
+		" ",
 		m.styles.help.Render(status),
 	)
-	help := m.styles.help.Render("1 对话 | 2 Debug | /mode 切换模式 | Tab 补全命令 | Ctrl+S 发送 | Enter 换行 | 拖动中线调整宽度 | Ctrl+C 退出")
+	help := m.styles.help.Render("1 对话 | 2 Debug | /new 新建 | /resume 恢复 | /mode 切换 | Tab 补全 | Ctrl+S 发送 | Ctrl+C 退出")
 	if m.approving {
 		help = m.styles.warn.Render("权限确认中：按 y 允许，按 n 拒绝")
 	}
