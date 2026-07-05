@@ -45,9 +45,12 @@ type WorkflowSummary struct {
 }
 
 type WorkflowPlanSummary struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
-	Path string `json:"path"`
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Path        string `json:"path"`
+	SourceHash  string `json:"source_hash,omitempty"`
+	CurrentHash string `json:"current_hash,omitempty"`
+	Stale       bool   `json:"stale"`
 }
 
 type CreateBlueprintRequest struct {
@@ -323,10 +326,14 @@ func (s *Store) ListWorkflowPlans() ([]WorkflowPlanSummary, error) {
 		if err != nil {
 			continue
 		}
+		currentHash, stale := s.currentWorkflowHash(plan.WorkflowID, plan.SourceHash)
 		summaries = append(summaries, WorkflowPlanSummary{
-			ID:   plan.WorkflowID,
-			Name: plan.Name,
-			Path: path,
+			ID:          plan.WorkflowID,
+			Name:        plan.Name,
+			Path:        path,
+			SourceHash:  plan.SourceHash,
+			CurrentHash: currentHash,
+			Stale:       stale,
 		})
 	}
 	sort.Slice(summaries, func(i, j int) bool {
@@ -644,6 +651,18 @@ func (s *Store) SaveCompiledWorkflowPlan(workflow WorkflowDefinition) (WorkflowC
 		return WorkflowCompiledPlan{}, "", err
 	}
 	return plan, path, nil
+}
+
+func (s *Store) currentWorkflowHash(id string, sourceHash string) (string, bool) {
+	workflow, err := s.ReadWorkflow(id)
+	if err != nil {
+		return "", true
+	}
+	currentHash, err := workflowSourceHash(workflow)
+	if err != nil {
+		return "", true
+	}
+	return currentHash, sourceHash == "" || currentHash != sourceHash
 }
 
 func (s *Store) ValidateWorkflowAgentReferences(workflow WorkflowDefinition) error {

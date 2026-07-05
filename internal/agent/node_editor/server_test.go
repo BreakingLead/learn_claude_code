@@ -537,7 +537,11 @@ func TestServerWorkflowPlanListAndGetAPI(t *testing.T) {
 		t.Fatal(err)
 	}
 	store := NewStore(workdir)
-	if _, _, err := store.SaveCompiledWorkflowPlan(DefaultWorkflow()); err != nil {
+	workflow := DefaultWorkflow()
+	if err := store.WriteWorkflow("review-pipeline", workflow); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := store.SaveCompiledWorkflowPlan(workflow); err != nil {
 		t.Fatal(err)
 	}
 	server := httptest.NewServer(NewServer(workdir).Handler())
@@ -560,6 +564,9 @@ func TestServerWorkflowPlanListAndGetAPI(t *testing.T) {
 	if len(list.Plans) != 1 || list.Plans[0].ID != "review-pipeline" {
 		t.Fatalf("unexpected workflow plan list: %+v", list)
 	}
+	if list.Plans[0].SourceHash == "" || list.Plans[0].CurrentHash == "" || list.Plans[0].Stale {
+		t.Fatalf("expected fresh workflow plan summary: %+v", list.Plans[0])
+	}
 
 	resp, err = http.Get(server.URL + "/api/workflow-plans/review-pipeline")
 	if err != nil {
@@ -575,6 +582,25 @@ func TestServerWorkflowPlanListAndGetAPI(t *testing.T) {
 	}
 	if plan.SourceHash == "" {
 		t.Fatalf("expected source hash in workflow plan: %+v", plan)
+	}
+
+	workflow.Name = "Changed Review Pipeline"
+	if err := store.WriteWorkflow("review-pipeline", workflow); err != nil {
+		t.Fatal(err)
+	}
+	resp, err = http.Get(server.URL + "/api/workflow-plans")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var staleList struct {
+		Plans []WorkflowPlanSummary `json:"plans"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&staleList); err != nil {
+		t.Fatal(err)
+	}
+	if len(staleList.Plans) != 1 || !staleList.Plans[0].Stale || staleList.Plans[0].CurrentHash == staleList.Plans[0].SourceHash {
+		t.Fatalf("expected stale workflow plan summary: %+v", staleList)
 	}
 }
 
