@@ -547,6 +547,9 @@
         const [composites, setComposites] = useState([]);
         const [activeCompositeId, setActiveCompositeId] = useState("");
         const [compositeSource, setCompositeSource] = useState("");
+        const [workflows, setWorkflows] = useState([]);
+        const [activeWorkflowId, setActiveWorkflowId] = useState("");
+        const [workflowSource, setWorkflowSource] = useState("");
         const [editorMode, setEditorMode] = useState("blueprint");
         const [validationResult, setValidationResult] = useState(null);
 
@@ -597,6 +600,23 @@
           setStatus(`loaded composite ${data.id}`);
         }, []);
 
+        const loadWorkflows = useCallback(async () => {
+          const response = await fetch("/api/workflows");
+          const data = await response.json();
+          if (!response.ok) throw new Error(data.error || response.statusText);
+          setWorkflows(Array.isArray(data.workflows) ? data.workflows : []);
+        }, []);
+
+        const loadWorkflow = useCallback(async (id) => {
+          const response = await fetch(`/api/workflows/${id}`);
+          const data = await response.json();
+          if (!response.ok) throw new Error(data.error || response.statusText);
+          setActiveWorkflowId(data.id);
+          setWorkflowSource(JSON.stringify(data, null, 2));
+          setEditorMode("workflow");
+          setStatus(`loaded workflow ${data.id}`);
+        }, []);
+
         const loadTemplates = useCallback(async () => {
           try {
             const response = await fetch("/api/node-templates");
@@ -612,8 +632,9 @@
         useEffect(() => {
           loadBlueprints().catch((error) => setStatus(`list failed: ${error.message}`));
           loadComposites().catch((error) => setStatus(`composite list failed: ${error.message}`));
+          loadWorkflows().catch((error) => setStatus(`workflow list failed: ${error.message}`));
           loadBlueprint("default").catch((error) => setStatus(`load failed: ${error.message}`));
-        }, [loadBlueprint, loadBlueprints, loadComposites]);
+        }, [loadBlueprint, loadBlueprints, loadComposites, loadWorkflows]);
 
         useEffect(() => {
           loadTemplates();
@@ -951,6 +972,19 @@
           await loadComposite(composites[0].id);
         };
 
+        const openWorkflowPanel = async () => {
+          if (activeWorkflowId) {
+            await loadWorkflow(activeWorkflowId);
+            return;
+          }
+          if (workflows.length === 0) {
+            setStatus("no workflows yet");
+            setEditorMode("workflow");
+            return;
+          }
+          await loadWorkflow(workflows[0].id);
+        };
+
         const saveComposite = async () => {
           try {
             const next = JSON.parse(compositeSource);
@@ -970,6 +1004,46 @@
             setStatus("composite saved");
           } catch (error) {
             setStatus(`composite save failed: ${error.message}`);
+          }
+        };
+
+        const validateWorkflow = async () => {
+          try {
+            const next = JSON.parse(workflowSource);
+            const response = await fetch(`/api/workflows/${next.id}/validate`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(next),
+            });
+            const result = await response.json();
+            if (!response.ok || !result.ok) {
+              setStatus(`workflow invalid: ${result.error || response.statusText}`);
+              return;
+            }
+            setStatus(`workflow valid: ${(result.order || []).join(" -> ")}`);
+          } catch (error) {
+            setStatus(`workflow invalid: ${error.message}`);
+          }
+        };
+
+        const saveWorkflow = async () => {
+          try {
+            const next = JSON.parse(workflowSource);
+            const response = await fetch(`/api/workflows/${next.id}`, {
+              method: "PUT",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(next),
+            });
+            const result = await response.json();
+            if (!response.ok || !result.ok) {
+              setStatus(`workflow save failed: ${result.error || response.statusText}`);
+              return;
+            }
+            setActiveWorkflowId(next.id);
+            await loadWorkflows();
+            setStatus("workflow saved");
+          } catch (error) {
+            setStatus(`workflow save failed: ${error.message}`);
           }
         };
 
@@ -1049,7 +1123,9 @@
             ),
             React.createElement("div", { className: "panel", key: "panel" }, [
               React.createElement("div", { className: "panelbar", key: "panelbar" }, [
-                React.createElement("span", { key: "label" }, editorMode === "blueprint" ? "Blueprint JSON" : "Composite JSON"),
+                React.createElement("span", { key: "label" },
+                  editorMode === "blueprint" ? "Blueprint JSON" : editorMode === "workflow" ? "Workflow JSON" : "Composite JSON"
+                ),
                 React.createElement("div", { className: "actions", key: "actions" }, [
                   React.createElement("button", {
                     key: "blueprint-mode",
@@ -1061,12 +1137,26 @@
                     disabled: editorMode === "composite" && composites.length === 0,
                     onClick: () => openCompositePanel().catch((error) => setStatus(`composite load failed: ${error.message}`)),
                   }, "Composites"),
+                  React.createElement("button", {
+                    key: "workflow-mode",
+                    disabled: editorMode === "workflow" && workflows.length === 0,
+                    onClick: () => openWorkflowPanel().catch((error) => setStatus(`workflow load failed: ${error.message}`)),
+                  }, "Workflows"),
                   editorMode === "composite" && composites.length > 0
                     ? React.createElement("select", {
                         key: "composite-select",
                         value: activeCompositeId,
                         onChange: (event) => loadComposite(event.target.value).catch((error) => setStatus(`composite load failed: ${error.message}`)),
                       }, composites.map((item) =>
+                        React.createElement("option", { key: item.id, value: item.id }, item.name ? `${item.name} (${item.id})` : item.id)
+                      ))
+                    : null,
+                  editorMode === "workflow" && workflows.length > 0
+                    ? React.createElement("select", {
+                        key: "workflow-select",
+                        value: activeWorkflowId,
+                        onChange: (event) => loadWorkflow(event.target.value).catch((error) => setStatus(`workflow load failed: ${error.message}`)),
+                      }, workflows.map((item) =>
                         React.createElement("option", { key: item.id, value: item.id }, item.name ? `${item.name} (${item.id})` : item.id)
                       ))
                     : null,
@@ -1083,8 +1173,21 @@
                   editorMode === "blueprint"
                     ? React.createElement("button", { key: "validate", onClick: validate }, "Validate")
                     : null,
+                  editorMode === "workflow"
+                    ? React.createElement("button", {
+                        key: "validate-workflow",
+                        disabled: !workflowSource.trim(),
+                        onClick: validateWorkflow,
+                      }, "Validate Workflow")
+                    : null,
                   editorMode === "blueprint"
                     ? React.createElement("button", { key: "save", onClick: save }, "Save")
+                    : editorMode === "workflow"
+                    ? React.createElement("button", {
+                        key: "save-workflow",
+                        disabled: !workflowSource.trim(),
+                        onClick: saveWorkflow,
+                      }, "Save Workflow")
                     : React.createElement("button", {
                         key: "save-composite",
                         disabled: !compositeSource.trim(),
@@ -1213,6 +1316,12 @@
                   ]
                 : [React.createElement("div", { className: "muted", key: "empty-selection" }, "Select a node to edit its label and config.")])
                   ])
+                : editorMode === "workflow"
+                ? React.createElement("div", { className: "inspector", key: "workflow-inspector" },
+                    React.createElement("div", { className: "muted" }, activeWorkflowId
+                      ? "Edit the multi-agent workflow DAG JSON. Validation checks typed message ports and cycle-free execution order."
+                      : "No workflow selected.")
+                  )
                 : React.createElement("div", { className: "inspector", key: "composite-inspector" },
                     React.createElement("div", { className: "muted" }, activeCompositeId
                       ? "Edit the reusable composite definition directly. Saving refreshes node templates."
@@ -1228,6 +1337,14 @@
                       setSource(event.target.value);
                       setValidationResult(null);
                     },
+                  })
+                : editorMode === "workflow"
+                ? React.createElement("textarea", {
+                    className: "json-editor",
+                    key: "workflow-editor",
+                    value: workflowSource,
+                    spellCheck: "false",
+                    onChange: (event) => setWorkflowSource(event.target.value),
                   })
                 : React.createElement("textarea", {
                     className: "json-editor",
