@@ -89,6 +89,13 @@ func (rt *agentRuntime) blueprintPromptBlocks(toolNames []string) ([]PromptBlock
 		}
 		blocks = append(blocks, rt.promptBlocksForBlueprintNode(node, toolNames)...)
 	}
+	for _, nodeID := range rt.blueprint.Resolved.MemoryNodes {
+		node, ok := nodes[nodeID]
+		if !ok {
+			continue
+		}
+		blocks = append(blocks, rt.promptBlocksForBlueprintNode(node, toolNames)...)
+	}
 	if len(blocks) == 0 {
 		return nil, false
 	}
@@ -151,6 +158,18 @@ func (rt *agentRuntime) promptBlocksForBlueprintNode(node nodeeditor.Node, toolN
 			})
 		}
 		return readPromptFiles(candidates, 6000)
+	case "default_memory", "memory_index":
+		path := strings.TrimSpace(stringConfig(node.Config, "path"))
+		if path == "" {
+			path = rt.config.MemoryIndex
+		} else if !filepath.IsAbs(path) {
+			path = filepath.Join(rt.config.Workdir, path)
+		}
+		return readPromptFiles([]promptFileCandidate{{
+			module: node.ID,
+			name:   name,
+			path:   path,
+		}}, 6000)
 	case "module_prompt":
 		blocks := rt.modules.promptBlocks(context.Background(), PromptRequest{ToolNames: toolNames})
 		moduleID := stringConfig(node.Config, "module")

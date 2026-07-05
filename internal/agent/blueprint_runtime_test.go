@@ -206,6 +206,38 @@ func TestRuntimeUsesFileBackedSkillNodeWhenEnabled(t *testing.T) {
 	}
 }
 
+func TestRuntimeUsesBlueprintMemoryNodeWhenEnabled(t *testing.T) {
+	workdir := t.TempDir()
+	writeFile(t, filepath.Join(workdir, ".agents", ".memory", "MEMORY.md"), "# Memory\nPrefer explicit state.")
+	config := testConfig(workdir)
+	config.UseBlueprint = true
+	blueprint := nodeeditor.DefaultBlueprint()
+	blueprint.Nodes = append(blueprint.Nodes, nodeeditor.Node{
+		ID:       "runtime-memory",
+		Type:     nodeeditor.NodeTypeMemory,
+		Label:    "Runtime Memory",
+		Position: nodeeditor.Position{X: 120, Y: 520},
+		Outputs: []nodeeditor.Port{
+			{ID: "memory_out", Type: nodeeditor.PortTypeMemory, Label: "Memory", Direction: nodeeditor.DirectionOutput},
+		},
+		Config: map[string]any{"source": "default_memory"},
+	})
+	blueprint.Edges = append(blueprint.Edges, nodeeditor.Edge{
+		ID:     "edge-runtime-memory",
+		Source: nodeeditor.Endpoint{Node: "runtime-memory", Port: "memory_out"},
+		Target: nodeeditor.Endpoint{Node: "agent-main", Port: "memory_in"},
+	})
+	if err := nodeeditor.WriteBlueprint(config.DefaultBlueprintPath, blueprint); err != nil {
+		t.Fatal(err)
+	}
+
+	rt := newAgentRuntime(config, nil, nil)
+	prompt := rt.getSystemPrompt([]string{"read_file"})
+	if !strings.Contains(prompt, "Prefer explicit state.") {
+		t.Fatalf("expected memory index content in prompt: %s", prompt)
+	}
+}
+
 func TestRuntimeFallsBackWhenBlueprintDisabled(t *testing.T) {
 	workdir := t.TempDir()
 	config := testConfig(workdir)
