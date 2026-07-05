@@ -92,6 +92,51 @@ type WorkflowSimulationResponse struct {
 	Steps []WorkflowSimulationStep `json:"steps,omitempty"`
 }
 
+type WorkflowCompileResponse struct {
+	OK    bool                 `json:"ok"`
+	Error string               `json:"error,omitempty"`
+	Plan  WorkflowCompiledPlan `json:"plan,omitempty"`
+}
+
+type WorkflowCompiledPlan struct {
+	WorkflowID  string                   `json:"workflow_id"`
+	Name        string                   `json:"name"`
+	Order       []string                 `json:"order"`
+	AgentRuns   []WorkflowCompiledRun    `json:"agent_runs"`
+	Diagnostics []string                 `json:"diagnostics,omitempty"`
+	Outputs     []WorkflowCompiledOutput `json:"outputs,omitempty"`
+}
+
+type WorkflowCompiledRun struct {
+	NodeID        string                      `json:"node_id"`
+	Label         string                      `json:"label"`
+	BlueprintID   string                      `json:"blueprint_id"`
+	BlueprintName string                      `json:"blueprint_name,omitempty"`
+	Instruction   string                      `json:"instruction,omitempty"`
+	Inputs        []WorkflowCompiledInput     `json:"inputs,omitempty"`
+	Outputs       []WorkflowCompiledRunOutput `json:"outputs,omitempty"`
+	ToolNames     []string                    `json:"tool_names,omitempty"`
+	PromptBlocks  []PromptPreviewBlock        `json:"prompt_blocks,omitempty"`
+	Diagnostics   []string                    `json:"diagnostics,omitempty"`
+}
+
+type WorkflowCompiledInput struct {
+	FromNode   string `json:"from_node"`
+	FromPort   string `json:"from_port"`
+	TargetPort string `json:"target_port"`
+}
+
+type WorkflowCompiledRunOutput struct {
+	Port string     `json:"port"`
+	To   []Endpoint `json:"to,omitempty"`
+}
+
+type WorkflowCompiledOutput struct {
+	NodeID string                  `json:"node_id"`
+	Label  string                  `json:"label"`
+	Inputs []WorkflowCompiledInput `json:"inputs,omitempty"`
+}
+
 type WorkflowAgentResolution struct {
 	NodeID        string               `json:"node_id"`
 	Label         string               `json:"label"`
@@ -458,6 +503,63 @@ func (s *Store) ValidateWorkflow(workflow WorkflowDefinition) WorkflowValidation
 	}
 }
 
+func (s *Store) CompileWorkflow(workflow WorkflowDefinition) (WorkflowCompiledPlan, error) {
+	order, err := WorkflowExecutionOrder(workflow)
+	if err != nil {
+		return WorkflowCompiledPlan{}, err
+	}
+	if err := s.ValidateWorkflowAgentReferences(workflow); err != nil {
+		return WorkflowCompiledPlan{}, err
+	}
+	nodes := map[string]WorkflowNode{}
+	incoming := map[string][]Edge{}
+	outgoing := map[string][]Edge{}
+	for _, node := range workflow.Nodes {
+		nodes[node.ID] = node
+	}
+	for _, edge := range workflow.Edges {
+		incoming[edge.Target.Node] = append(incoming[edge.Target.Node], edge)
+		outgoing[edge.Source.Node] = append(outgoing[edge.Source.Node], edge)
+	}
+
+	resolutions := map[string]WorkflowAgentResolution{}
+	for _, resolution := range s.ResolveWorkflowAgents(workflow) {
+		resolutions[resolution.NodeID] = resolution
+	}
+	plan := WorkflowCompiledPlan{
+		WorkflowID:  workflow.ID,
+		Name:        workflow.Name,
+		Order:       order,
+		Diagnostics: WorkflowDiagnostics(workflow),
+	}
+	for _, nodeID := range order {
+		node := nodes[nodeID]
+		switch node.Type {
+		case WorkflowNodeTypeAgent:
+			resolution := resolutions[node.ID]
+			plan.AgentRuns = append(plan.AgentRuns, WorkflowCompiledRun{
+				NodeID:        node.ID,
+				Label:         node.Label,
+				BlueprintID:   safeID(node.AgentBlueprint),
+				BlueprintName: resolution.BlueprintName,
+				Instruction:   workflowNodeInstruction(node),
+				Inputs:        compileWorkflowInputs(incoming[node.ID]),
+				Outputs:       compileWorkflowRunOutputs(node.Outputs, outgoing[node.ID]),
+				ToolNames:     resolution.ToolNames,
+				PromptBlocks:  resolution.PromptBlocks,
+				Diagnostics:   resolution.Diagnostics,
+			})
+		case WorkflowNodeTypeOutput:
+			plan.Outputs = append(plan.Outputs, WorkflowCompiledOutput{
+				NodeID: node.ID,
+				Label:  node.Label,
+				Inputs: compileWorkflowInputs(incoming[node.ID]),
+			})
+		}
+	}
+	return plan, nil
+}
+
 func (s *Store) ValidateWorkflowAgentReferences(workflow WorkflowDefinition) error {
 	for _, node := range workflow.Nodes {
 		if node.Type != WorkflowNodeTypeAgent {
@@ -550,6 +652,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /api/workflows/{id}", s.handleDeleteWorkflow)
 	mux.HandleFunc("POST /api/workflows/{id}/validate", s.handleValidateWorkflow)
 	mux.HandleFunc("POST /api/workflows/{id}/simulate", s.handleSimulateWorkflow)
+	mux.HandleFunc("POST /api/workflows/{id}/compile", s.handleCompileWorkflow)
 	static, _ := fs.Sub(webFS, "web")
 	mux.Handle("GET /", http.FileServer(http.FS(static)))
 	return mux
@@ -757,6 +860,24 @@ func (s *Server) handleSimulateWorkflow(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, WorkflowSimulationResponse{OK: true, Steps: steps})
 }
 
+func (s *Server) handleCompileWorkflow(w http.ResponseWriter, r *http.Request) {
+	workflow, err := decodeWorkflow(r.Body)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, WorkflowCompileResponse{OK: false, Error: err.Error()})
+		return
+	}
+	if safeID(workflow.ID) != safeID(r.PathValue("id")) {
+		writeJSON(w, http.StatusBadRequest, WorkflowCompileResponse{OK: false, Error: "workflow id does not match route id"})
+		return
+	}
+	plan, err := s.store.CompileWorkflow(workflow)
+	if err != nil {
+		writeJSON(w, http.StatusOK, WorkflowCompileResponse{OK: false, Error: err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, WorkflowCompileResponse{OK: true, Plan: plan})
+}
+
 func decodeBlueprint(body io.Reader) (Blueprint, error) {
 	defer io.Copy(io.Discard, body)
 	var blueprint Blueprint
@@ -842,4 +963,30 @@ func safeID(id string) string {
 		}
 	}
 	return b.String()
+}
+
+func compileWorkflowInputs(edges []Edge) []WorkflowCompiledInput {
+	inputs := make([]WorkflowCompiledInput, 0, len(edges))
+	for _, edge := range edges {
+		inputs = append(inputs, WorkflowCompiledInput{
+			FromNode:   edge.Source.Node,
+			FromPort:   edge.Source.Port,
+			TargetPort: edge.Target.Port,
+		})
+	}
+	return inputs
+}
+
+func compileWorkflowRunOutputs(ports []Port, edges []Edge) []WorkflowCompiledRunOutput {
+	var outputs []WorkflowCompiledRunOutput
+	for _, port := range ports {
+		if port.Direction != DirectionOutput || port.Type != PortTypeMessage {
+			continue
+		}
+		outputs = append(outputs, WorkflowCompiledRunOutput{
+			Port: port.ID,
+			To:   workflowSimulationTargets(port.ID, edges),
+		})
+	}
+	return outputs
 }

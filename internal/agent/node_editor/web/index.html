@@ -603,6 +603,7 @@
         const [validationResult, setValidationResult] = useState(null);
         const [workflowValidationResult, setWorkflowValidationResult] = useState(null);
         const [workflowSimulationResult, setWorkflowSimulationResult] = useState(null);
+        const [workflowCompileResult, setWorkflowCompileResult] = useState(null);
         const [workflowSimulationInput, setWorkflowSimulationInput] = useState("Describe the change you want this workflow to handle.");
         const selectedWorkflowNode = (() => {
           if (editorMode !== "workflow" || !selectedNodeId || !workflowSource.trim()) return null;
@@ -636,6 +637,7 @@
           setValidationResult(null);
           setWorkflowValidationResult(null);
           setWorkflowSimulationResult(null);
+          setWorkflowCompileResult(null);
           if (message) setStatus(message);
         }, [setEdges, setNodes]);
 
@@ -883,6 +885,8 @@
         const updateWorkflowSource = useCallback((raw) => {
           setWorkflowSource(raw);
           setWorkflowValidationResult(null);
+          setWorkflowSimulationResult(null);
+          setWorkflowCompileResult(null);
           try {
             const next = JSON.parse(raw);
             setNodes(toFlowNodes(next));
@@ -1268,6 +1272,26 @@
           }
         };
 
+        const compileWorkflow = async () => {
+          try {
+            const next = JSON.parse(workflowSource);
+            const response = await fetch(`/api/workflows/${next.id}/compile`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(next),
+            });
+            const result = await response.json();
+            setWorkflowCompileResult(result);
+            if (!response.ok || !result.ok) {
+              setStatus(`workflow compile failed: ${result.error || response.statusText}`);
+              return;
+            }
+            setStatus(`workflow compiled: ${(result.plan?.agent_runs || []).length} agent runs`);
+          } catch (error) {
+            setStatus(`workflow compile failed: ${error.message}`);
+          }
+        };
+
         const renderWorkflowValidationResult = () => {
           if (!workflowValidationResult) return null;
           if (!workflowValidationResult.ok) {
@@ -1387,6 +1411,65 @@
                     ...(step.outputs || []).map((output) =>
                       React.createElement("pre", { className: "code-preview", key: output.port },
                         `${step.node_id}.${output.port} -> ${(output.to || []).map((target) => `${target.node}.${target.port}`).join(", ") || "(end)"}\n${output.content || "(empty)"}`
+                      )
+                    ),
+                  ])
+                : null,
+            ])),
+          ]);
+        };
+
+        const renderWorkflowCompileResult = () => {
+          if (!workflowCompileResult) return null;
+          if (!workflowCompileResult.ok) {
+            return React.createElement("div", { className: "validation", key: "workflow-compile" }, [
+              React.createElement("div", { className: "validation-title", key: "title" }, "Workflow Compile"),
+              React.createElement("div", { className: "diagnostics", key: "error" },
+                workflowCompileResult.error || "Workflow compile failed."
+              ),
+            ]);
+          }
+          const plan = workflowCompileResult.plan || {};
+          const runs = plan.agent_runs || [];
+          return React.createElement("div", { className: "validation", key: "workflow-compile" }, [
+            React.createElement("div", { className: "validation-title", key: "title" }, "Compiled workflow"),
+            React.createElement("div", { className: "muted", key: "order" }, `order: ${(plan.order || []).join(" -> ") || "(empty)"}`),
+            (plan.diagnostics || []).length > 0
+              ? React.createElement("div", { className: "diagnostics", key: "diagnostics" },
+                  plan.diagnostics.map((item) => React.createElement("div", { key: item }, item))
+                )
+              : null,
+            ...runs.map((run, index) => React.createElement("div", { className: "validation", key: run.node_id }, [
+              React.createElement("div", { className: "validation-title", key: "title" },
+                `${index + 1}. ${run.label || run.node_id}`
+              ),
+              React.createElement("div", { className: "muted", key: "blueprint" },
+                `blueprint: ${run.blueprint_name ? `${run.blueprint_name} (${run.blueprint_id})` : run.blueprint_id}`
+              ),
+              run.instruction
+                ? React.createElement("div", { className: "muted", key: "instruction" }, `instruction: ${run.instruction}`)
+                : null,
+              (run.inputs || []).length > 0
+                ? React.createElement("pre", { className: "code-preview", key: "inputs" },
+                    `inputs:\n${(run.inputs || []).map((input) => `- ${input.from_node}.${input.from_port} -> ${run.node_id}.${input.target_port}`).join("\n")}`
+                  )
+                : null,
+              (run.outputs || []).length > 0
+                ? React.createElement("pre", { className: "code-preview", key: "outputs" },
+                    `outputs:\n${(run.outputs || []).map((output) => `- ${run.node_id}.${output.port} -> ${(output.to || []).map((target) => `${target.node}.${target.port}`).join(", ") || "(end)"}`).join("\n")}`
+                  )
+                : null,
+              (run.tool_names || []).length > 0
+                ? React.createElement("div", { className: "chip-row", key: "tools" },
+                    run.tool_names.map((tool) => React.createElement("span", { className: "chip", key: tool }, tool))
+                  )
+                : null,
+              (run.prompt_blocks || []).length > 0
+                ? React.createElement("div", { className: "field", key: "prompts" }, [
+                    React.createElement("label", { key: "label" }, "Prompt blocks"),
+                    ...run.prompt_blocks.map((block) =>
+                      React.createElement("pre", { className: "code-preview", key: block.node_id },
+                        `${block.name} [${block.source}]\n${block.preview || "(empty)"}`
                       )
                     ),
                   ])
@@ -1587,6 +1670,13 @@
                     : null,
                   editorMode === "workflow"
                     ? React.createElement("button", {
+                        key: "compile-workflow",
+                        disabled: !workflowSource.trim(),
+                        onClick: compileWorkflow,
+                      }, "Compile Workflow")
+                    : null,
+                  editorMode === "workflow"
+                    ? React.createElement("button", {
                         key: "new-workflow",
                         onClick: () => createWorkflow(""),
                       }, "New Workflow")
@@ -1776,6 +1866,7 @@
                       }),
                     ]),
                     renderWorkflowSimulationResult(),
+                    renderWorkflowCompileResult(),
                     React.createElement("div", { className: "muted", key: "help" }, activeWorkflowId
                       ? "Edit the multi-agent workflow DAG JSON. Validation checks typed message ports and cycle-free execution order."
                       : "No workflow selected."),

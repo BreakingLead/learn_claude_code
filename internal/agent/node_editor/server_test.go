@@ -439,6 +439,48 @@ func TestServerWorkflowSimulationAPI(t *testing.T) {
 	}
 }
 
+func TestServerWorkflowCompileAPI(t *testing.T) {
+	workdir := t.TempDir()
+	if _, err := EnsureDefaultBlueprint(DefaultBlueprintPath(workdir)); err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(NewServer(workdir).Handler())
+	defer server.Close()
+
+	raw, err := json.Marshal(DefaultWorkflow())
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := http.Post(server.URL+"/api/workflows/review-pipeline/compile", "application/json", bytes.NewReader(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("compile status = %d", resp.StatusCode)
+	}
+	var payload WorkflowCompileResponse
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatal(err)
+	}
+	if !payload.OK || payload.Plan.WorkflowID != "review-pipeline" {
+		t.Fatalf("unexpected compile payload: %+v", payload)
+	}
+	if len(payload.Plan.AgentRuns) != 3 {
+		t.Fatalf("expected three compiled agent runs, got %+v", payload.Plan.AgentRuns)
+	}
+	developer := payload.Plan.AgentRuns[0]
+	if developer.NodeID != "developer" || !containsNodeID(developer.ToolNames, "bash") {
+		t.Fatalf("unexpected developer run: %+v", developer)
+	}
+	if len(developer.PromptBlocks) == 0 || !strings.Contains(developer.Instruction, "Implement the requested change") {
+		t.Fatalf("expected compiled prompt and instruction, got %+v", developer)
+	}
+	if len(payload.Plan.Outputs) != 1 || payload.Plan.Outputs[0].NodeID != "output" {
+		t.Fatalf("unexpected compiled outputs: %+v", payload.Plan.Outputs)
+	}
+}
+
 func TestServerCreateWorkflowAPI(t *testing.T) {
 	workdir := t.TempDir()
 	if _, err := EnsureDefaultBlueprint(DefaultBlueprintPath(workdir)); err != nil {
