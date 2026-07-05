@@ -1741,6 +1741,12 @@
                 `${index + 1}. ${step.label || step.node_id}`
               ),
               React.createElement("div", { className: "muted", key: "blueprint" }, `blueprint: ${step.blueprint_id || "(none)"}`),
+              React.createElement("div", { className: step.status === "failed" ? "diagnostics" : "muted", key: "status" },
+                `status: ${step.status || "completed"}`
+              ),
+              step.error
+                ? React.createElement("div", { className: "diagnostics", key: "error" }, step.error)
+                : null,
               step.duration_ms !== undefined
                 ? React.createElement("div", { className: "muted", key: "duration" }, `duration: ${step.duration_ms}ms`)
                 : null,

@@ -50,6 +50,8 @@ type WorkflowPlanRunStep struct {
 	Label       string                      `json:"label"`
 	BlueprintID string                      `json:"blueprint_id"`
 	Instruction string                      `json:"instruction,omitempty"`
+	Status      string                      `json:"status,omitempty"`
+	Error       string                      `json:"error,omitempty"`
 	StartedAt   string                      `json:"started_at,omitempty"`
 	FinishedAt  string                      `json:"finished_at,omitempty"`
 	DurationMS  int64                       `json:"duration_ms,omitempty"`
@@ -216,19 +218,11 @@ func (e PlanExecutor) Execute(ctx context.Context, plan WorkflowCompiledPlan, in
 		stepStart := time.Now()
 		result, err := invoker.InvokeAgent(ctx, AgentInvocation{Run: agentRun, Inputs: stepInputs})
 		stepFinish := time.Now()
+		step := newWorkflowPlanRunStep(agentRun, stepInputs, stepStart, stepFinish)
 		if err != nil {
 			err = fmt.Errorf("invoke agent %q: %w", agentRun.NodeID, err)
+			run.Steps = append(run.Steps, failWorkflowPlanRunStep(step, err))
 			return failWorkflowPlanRun(run, err), err
-		}
-		step := WorkflowPlanRunStep{
-			NodeID:      agentRun.NodeID,
-			Label:       agentRun.Label,
-			BlueprintID: agentRun.BlueprintID,
-			Instruction: agentRun.Instruction,
-			StartedAt:   stepStart.UTC().Format(time.RFC3339Nano),
-			FinishedAt:  stepFinish.UTC().Format(time.RFC3339Nano),
-			DurationMS:  durationMillis(stepFinish.Sub(stepStart)),
-			Inputs:      stepInputs,
 		}
 		run.Diagnostics = append(run.Diagnostics, result.Diagnostics...)
 		for _, output := range agentRun.Outputs {
@@ -254,6 +248,28 @@ func (e PlanExecutor) Execute(ctx context.Context, plan WorkflowCompiledPlan, in
 	}
 	finishWorkflowPlanRun(&run, runStart, time.Now())
 	return run, nil
+}
+
+func newWorkflowPlanRunStep(agentRun WorkflowCompiledRun, inputs []WorkflowPlanRunInput, started time.Time, finished time.Time) WorkflowPlanRunStep {
+	return WorkflowPlanRunStep{
+		NodeID:      agentRun.NodeID,
+		Label:       agentRun.Label,
+		BlueprintID: agentRun.BlueprintID,
+		Instruction: agentRun.Instruction,
+		Status:      WorkflowRunStatusCompleted,
+		StartedAt:   started.UTC().Format(time.RFC3339Nano),
+		FinishedAt:  finished.UTC().Format(time.RFC3339Nano),
+		DurationMS:  durationMillis(finished.Sub(started)),
+		Inputs:      inputs,
+	}
+}
+
+func failWorkflowPlanRunStep(step WorkflowPlanRunStep, err error) WorkflowPlanRunStep {
+	step.Status = WorkflowRunStatusFailed
+	if err != nil {
+		step.Error = err.Error()
+	}
+	return step
 }
 
 func failWorkflowPlanRun(run WorkflowPlanRun, err error) WorkflowPlanRun {

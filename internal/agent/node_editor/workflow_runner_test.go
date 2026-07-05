@@ -121,6 +121,9 @@ func TestPlanExecutorUsesInvokerAndPropagatesResults(t *testing.T) {
 	if len(run.Steps) != 2 || run.Steps[1].Inputs[0].Content != "agent=first inputs=1" {
 		t.Fatalf("expected executor to propagate invoker output: %+v", run.Steps)
 	}
+	if run.Steps[0].Status != WorkflowRunStatusCompleted || run.Steps[1].Status != WorkflowRunStatusCompleted {
+		t.Fatalf("expected completed step statuses: %+v", run.Steps)
+	}
 	if len(run.Outputs) != 1 || run.Outputs[0].Content != "agent=second inputs=1" {
 		t.Fatalf("unexpected final output: %+v", run.Outputs)
 	}
@@ -180,6 +183,7 @@ func TestPlanExecutorTimesOutExternalCommand(t *testing.T) {
 		WorkflowID: "timeout",
 		AgentRuns: []WorkflowCompiledRun{{
 			NodeID:  "agent",
+			Inputs:  []WorkflowCompiledInput{{FromNode: "prompt", FromPort: "message", TargetPort: "input"}},
 			Outputs: []WorkflowCompiledRunOutput{{Port: "output"}},
 		}},
 	}, "input")
@@ -188,6 +192,19 @@ func TestPlanExecutorTimesOutExternalCommand(t *testing.T) {
 	}
 	if run.Status != WorkflowRunStatusFailed || !strings.Contains(run.Error, context.DeadlineExceeded.Error()) || run.StartedAt == "" || run.FinishedAt == "" {
 		t.Fatalf("expected failed run on timeout: %+v", run)
+	}
+	if len(run.Steps) != 1 {
+		t.Fatalf("expected failed step to be recorded: %+v", run.Steps)
+	}
+	step := run.Steps[0]
+	if step.Status != WorkflowRunStatusFailed || !strings.Contains(step.Error, context.DeadlineExceeded.Error()) {
+		t.Fatalf("expected failed step error on timeout: %+v", step)
+	}
+	if step.StartedAt == "" || step.FinishedAt == "" || step.DurationMS < 0 {
+		t.Fatalf("expected failed step timing: %+v", step)
+	}
+	if len(step.Inputs) != 1 || step.Inputs[0].Content != "input" {
+		t.Fatalf("expected failed step inputs to be preserved: %+v", step)
 	}
 }
 
