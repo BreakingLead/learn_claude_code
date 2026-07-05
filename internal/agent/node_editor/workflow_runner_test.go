@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 type recordingInvoker struct {
@@ -153,6 +154,37 @@ func TestExternalCommandAgentInvokerUsesJSONBoundary(t *testing.T) {
 	}
 	if !strings.Contains(string(raw), `"node_id":"agent"`) || !strings.Contains(string(raw), `"content":"hello"`) {
 		t.Fatalf("external command did not receive invocation JSON: %s", string(raw))
+	}
+}
+
+func TestPlanExecutorTimesOutExternalCommand(t *testing.T) {
+	dir := t.TempDir()
+	scriptPath := filepath.Join(dir, "slow-invoker.sh")
+	script := "#!/bin/sh\nsleep 1\nprintf '{\"content\":\"late\"}\\n'\n"
+	if err := os.WriteFile(scriptPath, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	executor, mode, err := NewPlanExecutor(WorkflowPlanRunRequest{
+		ExecutionMode:   "external_command",
+		ExternalCommand: []string{scriptPath},
+		TimeoutMS:       20,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mode != "external_command" || executor.TimeoutMS != 20 || executor.Timeout != 20*time.Millisecond {
+		t.Fatalf("unexpected executor config: mode=%s executor=%+v", mode, executor)
+	}
+
+	_, err = executor.Execute(context.Background(), WorkflowCompiledPlan{
+		WorkflowID: "timeout",
+		AgentRuns: []WorkflowCompiledRun{{
+			NodeID:  "agent",
+			Outputs: []WorkflowCompiledRunOutput{{Port: "output"}},
+		}},
+	}, "input")
+	if err == nil || !strings.Contains(err.Error(), context.DeadlineExceeded.Error()) {
+		t.Fatalf("expected timeout error, got %v", err)
 	}
 }
 

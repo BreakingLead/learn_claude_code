@@ -7,12 +7,16 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
+	"time"
 )
+
+const DefaultWorkflowRunTimeoutMS = 30000
 
 type WorkflowPlanRunRequest struct {
 	Input           string   `json:"input,omitempty"`
 	ExecutionMode   string   `json:"execution_mode,omitempty"`
 	ExternalCommand []string `json:"external_command,omitempty"`
+	TimeoutMS       int      `json:"timeout_ms,omitempty"`
 }
 
 type WorkflowPlanRun struct {
@@ -21,6 +25,7 @@ type WorkflowPlanRun struct {
 	Name          string                  `json:"name"`
 	CreatedAt     string                  `json:"created_at,omitempty"`
 	ExecutionMode string                  `json:"execution_mode,omitempty"`
+	TimeoutMS     int                     `json:"timeout_ms,omitempty"`
 	SourceHash    string                  `json:"source_hash"`
 	CurrentHash   string                  `json:"current_hash,omitempty"`
 	Stale         bool                    `json:"stale"`
@@ -60,7 +65,9 @@ type WorkflowPlanRunOutput struct {
 }
 
 type PlanExecutor struct {
-	Invoker AgentInvoker
+	Invoker   AgentInvoker
+	Timeout   time.Duration
+	TimeoutMS int
 }
 
 type AgentInvoker interface {
@@ -84,7 +91,11 @@ type ExternalCommandAgentInvoker struct {
 }
 
 func NewDryRunPlanExecutor() PlanExecutor {
-	return PlanExecutor{Invoker: DryRunAgentInvoker{}}
+	return PlanExecutor{
+		Invoker:   DryRunAgentInvoker{},
+		Timeout:   time.Duration(DefaultWorkflowRunTimeoutMS) * time.Millisecond,
+		TimeoutMS: DefaultWorkflowRunTimeoutMS,
+	}
 }
 
 func NewPlanExecutor(request WorkflowPlanRunRequest) (PlanExecutor, string, error) {
@@ -92,14 +103,23 @@ func NewPlanExecutor(request WorkflowPlanRunRequest) (PlanExecutor, string, erro
 	if mode == "" {
 		mode = "dry_run"
 	}
+	timeoutMS := request.TimeoutMS
+	if timeoutMS <= 0 {
+		timeoutMS = DefaultWorkflowRunTimeoutMS
+	}
+	timeout := time.Duration(timeoutMS) * time.Millisecond
 	switch mode {
 	case "dry_run":
-		return NewDryRunPlanExecutor(), mode, nil
+		return PlanExecutor{Invoker: DryRunAgentInvoker{}, Timeout: timeout, TimeoutMS: timeoutMS}, mode, nil
 	case "external_command":
 		if len(request.ExternalCommand) == 0 || strings.TrimSpace(request.ExternalCommand[0]) == "" {
 			return PlanExecutor{}, "", fmt.Errorf("external_command execution requires external_command")
 		}
-		return PlanExecutor{Invoker: ExternalCommandAgentInvoker{Command: append([]string(nil), request.ExternalCommand...)}}, mode, nil
+		return PlanExecutor{
+			Invoker:   ExternalCommandAgentInvoker{Command: append([]string(nil), request.ExternalCommand...)},
+			Timeout:   timeout,
+			TimeoutMS: timeoutMS,
+		}, mode, nil
 	default:
 		return PlanExecutor{}, "", fmt.Errorf("unknown execution mode %q", mode)
 	}
@@ -145,6 +165,14 @@ func RunCompiledWorkflowPlan(plan WorkflowCompiledPlan, input string) WorkflowPl
 }
 
 func (e PlanExecutor) Execute(ctx context.Context, plan WorkflowCompiledPlan, input string) (WorkflowPlanRun, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if e.Timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, e.Timeout)
+		defer cancel()
+	}
 	invoker := e.Invoker
 	if invoker == nil {
 		invoker = DryRunAgentInvoker{}
@@ -156,6 +184,7 @@ func (e PlanExecutor) Execute(ctx context.Context, plan WorkflowCompiledPlan, in
 	run := WorkflowPlanRun{
 		WorkflowID:  plan.WorkflowID,
 		Name:        plan.Name,
+		TimeoutMS:   e.TimeoutMS,
 		SourceHash:  plan.SourceHash,
 		Input:       input,
 		Diagnostics: append([]string(nil), plan.Diagnostics...),
@@ -226,6 +255,9 @@ func (i ExternalCommandAgentInvoker) InvokeAgent(ctx context.Context, invocation
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return AgentInvocationResult{}, ctxErr
+		}
 		message := strings.TrimSpace(stderr.String())
 		if message == "" {
 			message = err.Error()

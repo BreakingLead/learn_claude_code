@@ -613,6 +613,7 @@
         const [workflowSimulationInput, setWorkflowSimulationInput] = useState("Describe the change you want this workflow to handle.");
         const [workflowExecutionMode, setWorkflowExecutionMode] = useState("dry_run");
         const [workflowExternalCommand, setWorkflowExternalCommand] = useState("./scripts/workflow-dry-invoker");
+        const [workflowTimeoutMS, setWorkflowTimeoutMS] = useState(30000);
         const activeWorkflowPlan = workflowPlans.find((plan) => plan.id === activeWorkflowPlanId) || null;
         const activeWorkflowRun = workflowRuns.find((run) => run.id === activeWorkflowRunId) || null;
         const selectedWorkflowNode = (() => {
@@ -799,6 +800,7 @@
                 input: workflowSimulationInput,
                 execution_mode: workflowExecutionMode,
                 external_command: workflowExternalCommand.trim() ? workflowExternalCommand.trim().split(/\s+/) : [],
+                timeout_ms: Number(workflowTimeoutMS) || 30000,
               }),
             });
             const result = await response.json();
@@ -1660,6 +1662,7 @@
           return React.createElement("div", { className: "validation", key: "workflow-run" }, [
             React.createElement("div", { className: "validation-title", key: "title" }, "Workflow plan run"),
             React.createElement("div", { className: "muted", key: "mode" }, `mode: ${run.execution_mode || "dry_run"}`),
+            React.createElement("div", { className: "muted", key: "timeout" }, `timeout: ${run.timeout_ms || 30000}ms`),
             React.createElement("div", { className: "muted", key: "input" }, `input: ${run.input || "(empty)"}`),
             run.stale
               ? React.createElement("div", { className: "diagnostics", key: "stale" },
@@ -2165,6 +2168,17 @@
                         React.createElement("option", { key: "dry-run", value: "dry_run" }, "dry_run"),
                         React.createElement("option", { key: "external-command", value: "external_command" }, "external_command"),
                       ]),
+                    ]),
+                    React.createElement("div", { className: "field", key: "execution-timeout" }, [
+                      React.createElement("label", { key: "label" }, "Timeout Ms"),
+                      React.createElement("input", {
+                        key: "input",
+                        type: "number",
+                        min: "100",
+                        step: "100",
+                        value: workflowTimeoutMS,
+                        onChange: (event) => setWorkflowTimeoutMS(event.target.value),
+                      }),
                     ]),
                     workflowExecutionMode === "external_command"
                       ? React.createElement("div", { className: "field", key: "external-command" }, [
