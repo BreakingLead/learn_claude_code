@@ -478,7 +478,7 @@
         { type: "prompt", label: "Prompt", node: { type: "prompt", label: "Prompt", outputs: [{ id: "prompt_out", type: "prompt", label: "Prompt", direction: "output" }], config: { source: "inline", prompt: "Write prompt text here." } } },
         { type: "skill", label: "Skill", node: { type: "skill", label: "Skill", outputs: [{ id: "prompt_out", type: "prompt", label: "Prompt", direction: "output" }], config: { source: "inline", prompt: "Write skill instructions here." } } },
         { type: "toolset", label: "Toolset", node: { type: "toolset", label: "Toolset", outputs: [{ id: "toolset_out", type: "toolset", label: "Toolset", direction: "output" }], config: { tools: ["read_file", "glob"] } } },
-        { type: "memory", label: "Memory", node: { type: "memory", label: "Memory", outputs: [{ id: "memory_out", type: "memory", label: "Memory", direction: "output" }], config: { source: "default_memory" } } },
+        { type: "memory", label: "Memory", node: { type: "memory", label: "Memory", outputs: [{ id: "memory_out", type: "memory", label: "Memory", direction: "output" }], config: { source: "default_memory", path: ".agents/.memory/MEMORY.md" } } },
       ];
 
       function nodeFromTemplate(template, blueprint) {

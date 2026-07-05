@@ -54,7 +54,10 @@ func BuiltinNodeTemplates() []NodeTemplate {
 				Type:    NodeTypeMemory,
 				Label:   "Memory",
 				Outputs: []Port{{ID: "memory_out", Type: PortTypeMemory, Label: "Memory", Direction: DirectionOutput}},
-				Config:  map[string]any{"source": "default_memory"},
+				Config: map[string]any{
+					"source": "default_memory",
+					"path":   ".agents/.memory/MEMORY.md",
+				},
 			},
 		},
 	}
