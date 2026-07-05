@@ -16,4 +16,8 @@ wheels/
 .agents/.memory/
 .agents/.tasks/
 
+# Node editor frontend dependencies
+internal/agent/node_editor/webapp/node_modules/
+internal/agent/node_editor/webapp/.pnpm-store/
+
 exp/

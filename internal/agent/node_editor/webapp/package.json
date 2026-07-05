@@ -1,0 +1,17 @@
+{
+  "name": "bee-agent-node-editor",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "esbuild src/main.js --bundle --format=esm --target=es2022 --outdir=../web/assets --entry-names=app --asset-names=[name]-[hash] --legal-comments=none",
+    "check": "esbuild src/main.js --bundle --format=esm --target=es2022 --outfile=/tmp/bee-agent-node-editor-check.js --legal-comments=none"
+  },
+  "dependencies": {
+    "@xyflow/react": "12.3.6",
+    "react": "18.3.1",
+    "react-dom": "18.3.1"
+  },
+  "devDependencies": {
+    "esbuild": "0.24.2"
+  }
+}
