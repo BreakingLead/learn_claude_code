@@ -751,6 +751,32 @@ func TestServerRunWorkflowPlanAPI(t *testing.T) {
 	if stored.ID != payload.Run.ID || stored.Input != "build the API" {
 		t.Fatalf("unexpected stored run: %+v", stored)
 	}
+
+	req, err := http.NewRequest(http.MethodDelete, server.URL+"/api/workflow-runs/review-pipeline/"+payload.Run.ID, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("delete workflow run status = %d", resp.StatusCode)
+	}
+
+	resp, err = http.Get(server.URL + "/api/workflow-runs/review-pipeline")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	listPayload.Runs = nil
+	if err := json.NewDecoder(resp.Body).Decode(&listPayload); err != nil {
+		t.Fatal(err)
+	}
+	if len(listPayload.Runs) != 0 {
+		t.Fatalf("expected workflow run to be deleted: %+v", listPayload.Runs)
+	}
 }
 
 func TestServerRunWorkflowPlanPersistsFailures(t *testing.T) {

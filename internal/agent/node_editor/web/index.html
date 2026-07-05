@@ -738,6 +738,25 @@
           setStatus(`loaded workflow run ${data.id}`);
         }, []);
 
+        const deleteWorkflowRun = async () => {
+          if (!activeWorkflowPlanId || !activeWorkflowRunId) return;
+          if (!window.confirm(`Delete workflow run ${activeWorkflowRunId}?`)) return;
+          try {
+            const response = await fetch(`/api/workflow-runs/${activeWorkflowPlanId}/${activeWorkflowRunId}`, { method: "DELETE" });
+            const result = await response.json();
+            if (!response.ok || !result.ok) {
+              setStatus(`workflow run delete failed: ${result.error || response.statusText}`);
+              return;
+            }
+            setWorkflowRunResult(null);
+            setActiveWorkflowRunId("");
+            await loadWorkflowRuns(activeWorkflowPlanId);
+            setStatus("workflow run deleted");
+          } catch (error) {
+            setStatus(`workflow run delete failed: ${error.message}`);
+          }
+        };
+
         const loadWorkflowPlan = useCallback(async (id) => {
           const response = await fetch(`/api/workflow-plans/${id}`);
           const data = await response.json();
@@ -2168,6 +2187,12 @@
                         title: activeWorkflowRun?.output || "Load saved workflow run.",
                         onClick: () => loadWorkflowRun(activeWorkflowPlanId, activeWorkflowRunId).catch((error) => setStatus(`workflow run load failed: ${error.message}`)),
                       }, "Load Run"),
+                      React.createElement("button", {
+                        key: "delete",
+                        disabled: !activeWorkflowPlanId || !activeWorkflowRunId,
+                        title: "Delete saved workflow run.",
+                        onClick: deleteWorkflowRun,
+                      }, "Delete Run"),
                     ]),
                     React.createElement("div", { className: "field", key: "simulation-input" }, [
                       React.createElement("label", { key: "label" }, "Simulation Input"),

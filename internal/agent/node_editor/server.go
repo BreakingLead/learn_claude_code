@@ -589,6 +589,20 @@ func (s *Store) ReadWorkflowRun(workflowID string, runID string) (WorkflowPlanRu
 	return ReadWorkflowPlanRun(path)
 }
 
+func (s *Store) DeleteWorkflowRun(workflowID string, runID string) error {
+	path, err := s.WorkflowRunPath(workflowID, runID)
+	if err != nil {
+		return err
+	}
+	if err := os.Remove(path); err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("workflow run %q not found", runID)
+		}
+		return err
+	}
+	return nil
+}
+
 func (s *Store) SaveWorkflowRun(run WorkflowPlanRun) (WorkflowPlanRun, string, error) {
 	if strings.TrimSpace(run.WorkflowID) == "" {
 		return WorkflowPlanRun{}, "", fmt.Errorf("workflow id is required")
@@ -902,6 +916,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /api/workflow-plans/{id}", s.handleDeleteWorkflowPlan)
 	mux.HandleFunc("GET /api/workflow-runs/{workflow_id}", s.handleListWorkflowRuns)
 	mux.HandleFunc("GET /api/workflow-runs/{workflow_id}/{run_id}", s.handleGetWorkflowRun)
+	mux.HandleFunc("DELETE /api/workflow-runs/{workflow_id}/{run_id}", s.handleDeleteWorkflowRun)
 	static, _ := fs.Sub(webFS, "web")
 	mux.Handle("GET /", http.FileServer(http.FS(static)))
 	return mux
@@ -1111,6 +1126,14 @@ func (s *Server) handleGetWorkflowRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, run)
+}
+
+func (s *Server) handleDeleteWorkflowRun(w http.ResponseWriter, r *http.Request) {
+	if err := s.store.DeleteWorkflowRun(r.PathValue("workflow_id"), r.PathValue("run_id")); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 func (s *Server) handleCreateWorkflow(w http.ResponseWriter, r *http.Request) {
