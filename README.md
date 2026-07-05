@@ -136,6 +136,12 @@ BEE_AGENT_USE_BLUEPRINT=1 BEE_AGENT_BLUEPRINT_ID=review-agent go run ./cmd/bee-a
 BEE_AGENT_USE_BLUEPRINT=1 BEE_AGENT_BLUEPRINT_PATH=.agents/blueprints/agents/review-agent.json go run ./cmd/bee-agent
 ```
 
+仓库自带 `readonly-policy-agent` 示例：
+
+```bash
+BEE_AGENT_USE_BLUEPRINT=1 BEE_AGENT_BLUEPRINT_ID=readonly-policy-agent go run ./cmd/bee-agent
+```
+
 ## 消息平台中间层
 
 `messaging` 模块把外部平台 payload 统一为 `UnifiedMessage` 风格的数据：`platform`、`chat_id`、`sender_id`、`sender_name`、`text`、`message_type`、`timestamp`、`metadata`。当前内置 adapter：

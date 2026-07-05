@@ -1,0 +1,224 @@
+{
+  "version": 1,
+  "id": "readonly-policy-agent",
+  "name": "Readonly Policy Agent",
+  "root_agent": "agent-main",
+  "nodes": [
+    {
+      "id": "agent-main",
+      "type": "agent",
+      "label": "Readonly Agent",
+      "position": {
+        "x": 720,
+        "y": 160
+      },
+      "inputs": [
+        {
+          "id": "prompt_1",
+          "type": "prompt",
+          "label": "Prompt 1",
+          "direction": "input",
+          "order": 1
+        },
+        {
+          "id": "prompt_2",
+          "type": "prompt",
+          "label": "Prompt 2",
+          "direction": "input",
+          "order": 2
+        },
+        {
+          "id": "prompt_3",
+          "type": "prompt",
+          "label": "Prompt 3",
+          "direction": "input",
+          "order": 3
+        },
+        {
+          "id": "toolset_in",
+          "type": "toolset",
+          "label": "Tools",
+          "direction": "input",
+          "multiple": true
+        }
+      ],
+      "config": {
+        "display_name": "Readonly Agent"
+      }
+    },
+    {
+      "id": "project-context",
+      "type": "prompt",
+      "label": "Project Context",
+      "position": {
+        "x": 120,
+        "y": 80
+      },
+      "outputs": [
+        {
+          "id": "prompt_out",
+          "type": "prompt",
+          "label": "Prompt",
+          "direction": "output"
+        }
+      ],
+      "config": {
+        "source": "project_files",
+        "files": [
+          "AGENTS.md",
+          "README.md"
+        ]
+      }
+    },
+    {
+      "id": "active-mode",
+      "type": "prompt",
+      "label": "Active Mode",
+      "position": {
+        "x": 120,
+        "y": 220
+      },
+      "outputs": [
+        {
+          "id": "prompt_out",
+          "type": "prompt",
+          "label": "Prompt",
+          "direction": "output"
+        }
+      ],
+      "config": {
+        "source": "active_mode"
+      }
+    },
+    {
+      "id": "core-tools",
+      "type": "toolset",
+      "label": "Core Tools",
+      "position": {
+        "x": 120,
+        "y": 380
+      },
+      "outputs": [
+        {
+          "id": "toolset_out",
+          "type": "toolset",
+          "label": "Toolset",
+          "direction": "output"
+        }
+      ],
+      "config": {
+        "tools": [
+          "bash",
+          "read_file",
+          "write_file",
+          "edit_file",
+          "glob"
+        ]
+      }
+    },
+    {
+      "id": "readonly-policy",
+      "type": "policy",
+      "label": "Readonly Policy",
+      "position": {
+        "x": 420,
+        "y": 330
+      },
+      "inputs": [
+        {
+          "id": "toolset_in",
+          "type": "toolset",
+          "label": "Tools In",
+          "direction": "input",
+          "multiple": true
+        }
+      ],
+      "outputs": [
+        {
+          "id": "toolset_out",
+          "type": "toolset",
+          "label": "Tools Out",
+          "direction": "output"
+        },
+        {
+          "id": "prompt_out",
+          "type": "prompt",
+          "label": "Prompt",
+          "direction": "output"
+        }
+      ],
+      "config": {
+        "allow_tools": [
+          "bash",
+          "read_file",
+          "glob"
+        ],
+        "deny_tools": [
+          "write_file",
+          "edit_file"
+        ],
+        "prompt": "Readonly policy: inspect files and propose changes, but do not edit files unless the user switches to a write-enabled blueprint."
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "edge-project-agent",
+      "source": {
+        "node": "project-context",
+        "port": "prompt_out"
+      },
+      "target": {
+        "node": "agent-main",
+        "port": "prompt_1"
+      }
+    },
+    {
+      "id": "edge-mode-agent",
+      "source": {
+        "node": "active-mode",
+        "port": "prompt_out"
+      },
+      "target": {
+        "node": "agent-main",
+        "port": "prompt_2"
+      }
+    },
+    {
+      "id": "edge-policy-prompt-agent",
+      "source": {
+        "node": "readonly-policy",
+        "port": "prompt_out"
+      },
+      "target": {
+        "node": "agent-main",
+        "port": "prompt_3"
+      }
+    },
+    {
+      "id": "edge-tools-policy",
+      "source": {
+        "node": "core-tools",
+        "port": "toolset_out"
+      },
+      "target": {
+        "node": "readonly-policy",
+        "port": "toolset_in"
+      }
+    },
+    {
+      "id": "edge-policy-agent",
+      "source": {
+        "node": "readonly-policy",
+        "port": "toolset_out"
+      },
+      "target": {
+        "node": "agent-main",
+        "port": "toolset_in"
+      }
+    }
+  ],
+  "metadata": {
+    "purpose": "Example agent blueprint that uses a policy node to filter write tools while injecting a readonly operating prompt."
+  }
+}

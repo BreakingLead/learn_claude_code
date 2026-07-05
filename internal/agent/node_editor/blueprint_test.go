@@ -28,6 +28,34 @@ func TestDefaultBlueprintValidatesAndResolves(t *testing.T) {
 	}
 }
 
+func TestExampleAgentBlueprintsValidateAndResolve(t *testing.T) {
+	paths, err := filepath.Glob(filepath.Join("..", "..", "..", ".agents", "blueprints", "agents", "*.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(paths) == 0 {
+		t.Fatal("expected example agent blueprints")
+	}
+	for _, path := range paths {
+		t.Run(filepath.Base(path), func(t *testing.T) {
+			blueprint, err := ReadBlueprint(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := Validate(blueprint); err != nil {
+				t.Fatal(err)
+			}
+			resolved, err := Resolve(blueprint)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if resolved.ID == "" {
+				t.Fatalf("missing resolved agent for %s", path)
+			}
+		})
+	}
+}
+
 func TestEnsureDefaultBlueprintWritesOnce(t *testing.T) {
 	path := filepath.Join(t.TempDir(), ".agents", "blueprints", "agents", "default.json")
 	created, err := EnsureDefaultBlueprint(path)
