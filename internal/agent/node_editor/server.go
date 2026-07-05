@@ -49,6 +49,12 @@ type CompositeFromSelectionRequest struct {
 	Name      string    `json:"name"`
 }
 
+type BlueprintRuntimeSelector struct {
+	ID      string `json:"id"`
+	Path    string `json:"path"`
+	Command string `json:"command"`
+}
+
 func NewStore(workdir string) *Store {
 	return &Store{root: filepath.Join(workdir, ".agents", "blueprints")}
 }
@@ -157,6 +163,19 @@ func (s *Store) WriteAgent(id string, blueprint Blueprint) error {
 		return err
 	}
 	return WriteBlueprint(path, blueprint)
+}
+
+func (s *Store) RuntimeSelector(id string) BlueprintRuntimeSelector {
+	id = safeID(id)
+	if id == "" {
+		id = "default"
+	}
+	path := filepath.ToSlash(filepath.Join(".agents", "blueprints", "agents", id+".json"))
+	return BlueprintRuntimeSelector{
+		ID:      id,
+		Path:    path,
+		Command: "BEE_AGENT_USE_BLUEPRINT=1 BEE_AGENT_BLUEPRINT_ID=" + id + " go run ./cmd/bee-agent",
+	}
 }
 
 func (s *Store) CreateAgent(request CreateBlueprintRequest) (Blueprint, error) {
@@ -326,7 +345,14 @@ func (s *Server) handleValidateBlueprint(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	capabilities := EffectiveToolNames(expanded, resolved)
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "resolved": resolved, "expanded": expanded, "capabilities": capabilities})
+	runtime := s.store.RuntimeSelector(blueprint.ID)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":           true,
+		"resolved":     resolved,
+		"expanded":     expanded,
+		"capabilities": capabilities,
+		"runtime":      runtime,
+	})
 }
 
 func (s *Server) handleListComposites(w http.ResponseWriter, r *http.Request) {

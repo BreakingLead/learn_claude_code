@@ -62,6 +62,7 @@ func TestServerBlueprintAPI(t *testing.T) {
 	var validation struct {
 		OK           bool                 `json:"ok"`
 		Capabilities CapabilityResolution `json:"capabilities"`
+		Runtime      BlueprintRuntimeSelector
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&validation); err != nil {
 		t.Fatal(err)
@@ -71,6 +72,9 @@ func TestServerBlueprintAPI(t *testing.T) {
 	}
 	if !validation.Capabilities.Resolved || len(validation.Capabilities.ToolNames) == 0 {
 		t.Fatalf("expected validation capabilities, got %+v", validation.Capabilities)
+	}
+	if validation.Runtime.ID != "default" || !strings.Contains(validation.Runtime.Command, "BEE_AGENT_BLUEPRINT_ID=default") {
+		t.Fatalf("expected runtime selector, got %+v", validation.Runtime)
 	}
 }
 

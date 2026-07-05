@@ -823,10 +823,17 @@
           }
           const tools = validationResult.capabilities?.tool_names || [];
           const diagnostics = validationResult.capabilities?.diagnostics || [];
+          const runtimeCommand = validationResult.runtime?.command || "";
           return React.createElement("div", { className: "validation", key: "validation" }, [
             React.createElement("div", { className: "validation-title", key: "title" },
               `Valid: ${validationResult.resolved?.id || "agent"}`
             ),
+            runtimeCommand
+              ? React.createElement("div", { className: "field", key: "runtime" }, [
+                  React.createElement("label", { key: "label" }, "Run"),
+                  React.createElement("input", { key: "input", value: runtimeCommand, readOnly: true }),
+                ])
+              : null,
             React.createElement("div", { className: "muted", key: "tools-label" }, `Effective tools (${tools.length})`),
             tools.length > 0
               ? React.createElement("div", { className: "chip-row", key: "tools" },
