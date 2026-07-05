@@ -611,6 +611,8 @@
         const [workflowRunResult, setWorkflowRunResult] = useState(null);
         const [compiledPlanPath, setCompiledPlanPath] = useState("");
         const [workflowSimulationInput, setWorkflowSimulationInput] = useState("Describe the change you want this workflow to handle.");
+        const [workflowExecutionMode, setWorkflowExecutionMode] = useState("dry_run");
+        const [workflowExternalCommand, setWorkflowExternalCommand] = useState("");
         const activeWorkflowPlan = workflowPlans.find((plan) => plan.id === activeWorkflowPlanId) || null;
         const activeWorkflowRun = workflowRuns.find((run) => run.id === activeWorkflowRunId) || null;
         const selectedWorkflowNode = (() => {
@@ -793,7 +795,11 @@
             const response = await fetch(`/api/workflow-plans/${activeWorkflowPlanId}/run`, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ input: workflowSimulationInput }),
+              body: JSON.stringify({
+                input: workflowSimulationInput,
+                execution_mode: workflowExecutionMode,
+                external_command: workflowExternalCommand.trim() ? workflowExternalCommand.trim().split(/\s+/) : [],
+              }),
             });
             const result = await response.json();
             setWorkflowRunResult(result);
@@ -803,7 +809,7 @@
             }
             setActiveWorkflowRunId(result.run?.id || "");
             await loadWorkflowRuns(result.run?.workflow_id || activeWorkflowPlanId);
-            setStatus(`workflow plan dry-run ready: ${(result.run?.steps || []).length} agent steps`);
+            setStatus(`workflow plan run ready: ${(result.run?.steps || []).length} agent steps`);
           } catch (error) {
             setWorkflowRunResult({ ok: false, error: error.message });
             setStatus(`workflow plan run failed: ${error.message}`);
@@ -1652,7 +1658,8 @@
           }
           const run = workflowRunResult.run || {};
           return React.createElement("div", { className: "validation", key: "workflow-run" }, [
-            React.createElement("div", { className: "validation-title", key: "title" }, "Workflow plan dry-run"),
+            React.createElement("div", { className: "validation-title", key: "title" }, "Workflow plan run"),
+            React.createElement("div", { className: "muted", key: "mode" }, `mode: ${run.execution_mode || "dry_run"}`),
             React.createElement("div", { className: "muted", key: "input" }, `input: ${run.input || "(empty)"}`),
             run.stale
               ? React.createElement("div", { className: "diagnostics", key: "stale" },
@@ -1885,7 +1892,7 @@
                   editorMode === "workflow"
                     ? React.createElement("button", {
                         key: "run-workflow-plan",
-                        disabled: !activeWorkflowPlanId,
+                        disabled: !activeWorkflowPlanId || (workflowExecutionMode === "external_command" && !workflowExternalCommand.trim()),
                         onClick: runWorkflowPlan,
                       }, "Run Plan")
                     : null,
@@ -2127,7 +2134,7 @@
                         React.createElement("option", { key: "empty", value: "" }, workflowRuns.length ? "Select run" : "No runs"),
                         ...workflowRuns.map((run) =>
                           React.createElement("option", { key: run.id, value: run.id },
-                            `${run.created_at || run.id}${run.stale ? " (stale)" : ""}`
+                            `${run.created_at || run.id} [${run.execution_mode || "dry_run"}]${run.stale ? " (stale)" : ""}`
                           )
                         ),
                       ]),
@@ -2148,6 +2155,29 @@
                         onChange: (event) => setWorkflowSimulationInput(event.target.value),
                       }),
                     ]),
+                    React.createElement("div", { className: "field", key: "execution-mode" }, [
+                      React.createElement("label", { key: "label" }, "Execution Mode"),
+                      React.createElement("select", {
+                        key: "select",
+                        value: workflowExecutionMode,
+                        onChange: (event) => setWorkflowExecutionMode(event.target.value),
+                      }, [
+                        React.createElement("option", { key: "dry-run", value: "dry_run" }, "dry_run"),
+                        React.createElement("option", { key: "external-command", value: "external_command" }, "external_command"),
+                      ]),
+                    ]),
+                    workflowExecutionMode === "external_command"
+                      ? React.createElement("div", { className: "field", key: "external-command" }, [
+                          React.createElement("label", { key: "label" }, "External Command"),
+                          React.createElement("input", {
+                            key: "input",
+                            value: workflowExternalCommand,
+                            spellCheck: "false",
+                            placeholder: "./scripts/workflow-agent-invoker",
+                            onChange: (event) => setWorkflowExternalCommand(event.target.value),
+                          }),
+                        ])
+                      : null,
                     renderWorkflowSimulationResult(),
                     renderWorkflowCompileResult(),
                     renderWorkflowRunResult(),

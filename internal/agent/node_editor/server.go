@@ -55,13 +55,14 @@ type WorkflowPlanSummary struct {
 }
 
 type WorkflowRunSummary struct {
-	ID         string `json:"id"`
-	WorkflowID string `json:"workflow_id"`
-	Name       string `json:"name"`
-	Path       string `json:"path"`
-	CreatedAt  string `json:"created_at"`
-	Stale      bool   `json:"stale"`
-	Output     string `json:"output,omitempty"`
+	ID            string `json:"id"`
+	WorkflowID    string `json:"workflow_id"`
+	Name          string `json:"name"`
+	Path          string `json:"path"`
+	CreatedAt     string `json:"created_at"`
+	ExecutionMode string `json:"execution_mode,omitempty"`
+	Stale         bool   `json:"stale"`
+	Output        string `json:"output,omitempty"`
 }
 
 type CreateBlueprintRequest struct {
@@ -403,13 +404,14 @@ func (s *Store) ListWorkflowRuns(workflowID string) ([]WorkflowRunSummary, error
 			continue
 		}
 		summaries = append(summaries, WorkflowRunSummary{
-			ID:         run.ID,
-			WorkflowID: run.WorkflowID,
-			Name:       run.Name,
-			Path:       path,
-			CreatedAt:  run.CreatedAt,
-			Stale:      run.Stale,
-			Output:     workflowRunSummaryOutput(run),
+			ID:            run.ID,
+			WorkflowID:    run.WorkflowID,
+			Name:          run.Name,
+			Path:          path,
+			CreatedAt:     run.CreatedAt,
+			ExecutionMode: run.ExecutionMode,
+			Stale:         run.Stale,
+			Output:        workflowRunSummaryOutput(run),
 		})
 	}
 	sort.Slice(summaries, func(i, j int) bool {
@@ -1065,7 +1067,7 @@ func (s *Server) handleRunWorkflowPlan(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, WorkflowRunSaveResponse{OK: false, Error: err.Error()})
 		return
 	}
-	run, err := s.store.RunWorkflowPlan(r.Context(), r.PathValue("id"), request.Input)
+	run, err := s.store.RunWorkflowPlan(r.Context(), r.PathValue("id"), request)
 	if err != nil {
 		writeJSON(w, http.StatusOK, WorkflowRunSaveResponse{OK: false, Error: err.Error()})
 		return

@@ -3,6 +3,8 @@ package nodeeditor
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -120,5 +122,36 @@ func TestPlanExecutorUsesInvokerAndPropagatesResults(t *testing.T) {
 	}
 	if len(run.Outputs) != 1 || run.Outputs[0].Content != "agent=second inputs=1" {
 		t.Fatalf("unexpected final output: %+v", run.Outputs)
+	}
+}
+
+func TestExternalCommandAgentInvokerUsesJSONBoundary(t *testing.T) {
+	dir := t.TempDir()
+	capturePath := filepath.Join(dir, "invocation.json")
+	scriptPath := filepath.Join(dir, "invoker.sh")
+	script := "#!/bin/sh\ncat > \"$1\"\nprintf '{\"content\":\"external ok\",\"diagnostics\":[\"from command\"]}\\n'\n"
+	if err := os.WriteFile(scriptPath, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	invoker := ExternalCommandAgentInvoker{Command: []string{scriptPath, capturePath}}
+
+	result, err := invoker.InvokeAgent(context.Background(), AgentInvocation{
+		Run: WorkflowCompiledRun{NodeID: "agent", BlueprintID: "default"},
+		Inputs: []WorkflowPlanRunInput{{
+			FromNode: "prompt", FromPort: "message", TargetPort: "input", Content: "hello",
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Content != "external ok" || strings.Join(result.Diagnostics, ",") != "from command" {
+		t.Fatalf("unexpected command result: %+v", result)
+	}
+	raw, err := os.ReadFile(capturePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), `"node_id":"agent"`) || !strings.Contains(string(raw), `"content":"hello"`) {
+		t.Fatalf("external command did not receive invocation JSON: %s", string(raw))
 	}
 }

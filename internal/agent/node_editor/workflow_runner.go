@@ -1,33 +1,33 @@
 package nodeeditor
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"os/exec"
 	"strings"
 )
 
 type WorkflowPlanRunRequest struct {
-	Input string `json:"input,omitempty"`
-}
-
-type WorkflowPlanRunResponse struct {
-	OK    bool            `json:"ok"`
-	Error string          `json:"error,omitempty"`
-	Run   WorkflowPlanRun `json:"run,omitempty"`
+	Input           string   `json:"input,omitempty"`
+	ExecutionMode   string   `json:"execution_mode,omitempty"`
+	ExternalCommand []string `json:"external_command,omitempty"`
 }
 
 type WorkflowPlanRun struct {
-	ID          string                  `json:"id,omitempty"`
-	WorkflowID  string                  `json:"workflow_id"`
-	Name        string                  `json:"name"`
-	CreatedAt   string                  `json:"created_at,omitempty"`
-	SourceHash  string                  `json:"source_hash"`
-	CurrentHash string                  `json:"current_hash,omitempty"`
-	Stale       bool                    `json:"stale"`
-	Input       string                  `json:"input"`
-	Steps       []WorkflowPlanRunStep   `json:"steps,omitempty"`
-	Outputs     []WorkflowPlanRunOutput `json:"outputs,omitempty"`
-	Diagnostics []string                `json:"diagnostics,omitempty"`
+	ID            string                  `json:"id,omitempty"`
+	WorkflowID    string                  `json:"workflow_id"`
+	Name          string                  `json:"name"`
+	CreatedAt     string                  `json:"created_at,omitempty"`
+	ExecutionMode string                  `json:"execution_mode,omitempty"`
+	SourceHash    string                  `json:"source_hash"`
+	CurrentHash   string                  `json:"current_hash,omitempty"`
+	Stale         bool                    `json:"stale"`
+	Input         string                  `json:"input"`
+	Steps         []WorkflowPlanRunStep   `json:"steps,omitempty"`
+	Outputs       []WorkflowPlanRunOutput `json:"outputs,omitempty"`
+	Diagnostics   []string                `json:"diagnostics,omitempty"`
 }
 
 type WorkflowPlanRunStep struct {
@@ -79,19 +79,46 @@ type AgentInvocationResult struct {
 
 type DryRunAgentInvoker struct{}
 
+type ExternalCommandAgentInvoker struct {
+	Command []string
+}
+
 func NewDryRunPlanExecutor() PlanExecutor {
 	return PlanExecutor{Invoker: DryRunAgentInvoker{}}
 }
 
-func (s *Store) RunWorkflowPlan(ctx context.Context, id string, input string) (WorkflowPlanRun, error) {
+func NewPlanExecutor(request WorkflowPlanRunRequest) (PlanExecutor, string, error) {
+	mode := strings.TrimSpace(request.ExecutionMode)
+	if mode == "" {
+		mode = "dry_run"
+	}
+	switch mode {
+	case "dry_run":
+		return NewDryRunPlanExecutor(), mode, nil
+	case "external_command":
+		if len(request.ExternalCommand) == 0 || strings.TrimSpace(request.ExternalCommand[0]) == "" {
+			return PlanExecutor{}, "", fmt.Errorf("external_command execution requires external_command")
+		}
+		return PlanExecutor{Invoker: ExternalCommandAgentInvoker{Command: append([]string(nil), request.ExternalCommand...)}}, mode, nil
+	default:
+		return PlanExecutor{}, "", fmt.Errorf("unknown execution mode %q", mode)
+	}
+}
+
+func (s *Store) RunWorkflowPlan(ctx context.Context, id string, request WorkflowPlanRunRequest) (WorkflowPlanRun, error) {
 	plan, err := s.ReadWorkflowPlan(id)
 	if err != nil {
 		return WorkflowPlanRun{}, err
 	}
-	run, err := NewDryRunPlanExecutor().Execute(ctx, plan, input)
+	executor, mode, err := NewPlanExecutor(request)
 	if err != nil {
 		return WorkflowPlanRun{}, err
 	}
+	run, err := executor.Execute(ctx, plan, request.Input)
+	if err != nil {
+		return WorkflowPlanRun{}, err
+	}
+	run.ExecutionMode = mode
 	currentHash, stale := s.currentWorkflowHash(plan.WorkflowID, plan.SourceHash)
 	run.CurrentHash = currentHash
 	run.Stale = stale
@@ -105,13 +132,15 @@ func RunCompiledWorkflowPlan(plan WorkflowCompiledPlan, input string) WorkflowPl
 	run, err := NewDryRunPlanExecutor().Execute(context.Background(), plan, input)
 	if err != nil {
 		return WorkflowPlanRun{
-			WorkflowID:  plan.WorkflowID,
-			Name:        plan.Name,
-			SourceHash:  plan.SourceHash,
-			Input:       input,
-			Diagnostics: []string{err.Error()},
+			WorkflowID:    plan.WorkflowID,
+			Name:          plan.Name,
+			ExecutionMode: "dry_run",
+			SourceHash:    plan.SourceHash,
+			Input:         input,
+			Diagnostics:   []string{err.Error()},
 		}
 	}
+	run.ExecutionMode = "dry_run"
 	return run
 }
 
@@ -180,6 +209,41 @@ func (DryRunAgentInvoker) InvokeAgent(ctx context.Context, invocation AgentInvoc
 	return AgentInvocationResult{
 		Content: workflowPlanDryRunContent(invocation.Run, invocation.Inputs),
 	}, nil
+}
+
+func (i ExternalCommandAgentInvoker) InvokeAgent(ctx context.Context, invocation AgentInvocation) (AgentInvocationResult, error) {
+	if len(i.Command) == 0 || strings.TrimSpace(i.Command[0]) == "" {
+		return AgentInvocationResult{}, fmt.Errorf("external command is required")
+	}
+	raw, err := json.Marshal(invocation)
+	if err != nil {
+		return AgentInvocationResult{}, err
+	}
+	cmd := exec.CommandContext(ctx, i.Command[0], i.Command[1:]...)
+	cmd.Stdin = bytes.NewReader(raw)
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		message := strings.TrimSpace(stderr.String())
+		if message == "" {
+			message = err.Error()
+		}
+		return AgentInvocationResult{}, fmt.Errorf("external command failed: %s", message)
+	}
+	output := strings.TrimSpace(stdout.String())
+	if output == "" {
+		return AgentInvocationResult{}, fmt.Errorf("external command returned empty output")
+	}
+	var result AgentInvocationResult
+	if err := json.Unmarshal([]byte(output), &result); err != nil {
+		return AgentInvocationResult{Content: output}, nil
+	}
+	if strings.TrimSpace(result.Content) == "" {
+		return AgentInvocationResult{}, fmt.Errorf("external command result content is required")
+	}
+	return result, nil
 }
 
 func workflowPlanRunInputs(inputs []WorkflowCompiledInput, messages map[string]string, fallback string) []WorkflowPlanRunInput {

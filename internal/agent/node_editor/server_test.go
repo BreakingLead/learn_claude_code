@@ -707,7 +707,7 @@ func TestServerRunWorkflowPlanAPI(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("run workflow plan status = %d", resp.StatusCode)
 	}
-	var payload WorkflowPlanRunResponse
+	var payload WorkflowRunSaveResponse
 	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
 		t.Fatal(err)
 	}
@@ -720,7 +720,7 @@ func TestServerRunWorkflowPlanAPI(t *testing.T) {
 	if len(payload.Run.Outputs) != 1 || !strings.Contains(payload.Run.Outputs[0].Content, "Summary Agent") {
 		t.Fatalf("unexpected run output: %+v", payload.Run.Outputs)
 	}
-	if payload.Run.ID == "" || payload.Run.CreatedAt == "" {
+	if payload.Run.ID == "" || payload.Run.CreatedAt == "" || payload.Run.ExecutionMode != "dry_run" {
 		t.Fatalf("expected saved run metadata: %+v", payload.Run)
 	}
 
@@ -735,7 +735,7 @@ func TestServerRunWorkflowPlanAPI(t *testing.T) {
 	if err := json.NewDecoder(resp.Body).Decode(&listPayload); err != nil {
 		t.Fatal(err)
 	}
-	if len(listPayload.Runs) != 1 || listPayload.Runs[0].ID != payload.Run.ID {
+	if len(listPayload.Runs) != 1 || listPayload.Runs[0].ID != payload.Run.ID || listPayload.Runs[0].ExecutionMode != "dry_run" {
 		t.Fatalf("unexpected run list: %+v", listPayload.Runs)
 	}
 
