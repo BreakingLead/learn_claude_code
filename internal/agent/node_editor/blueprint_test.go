@@ -184,3 +184,41 @@ func TestEffectiveToolNamesAppliesPolicyNodes(t *testing.T) {
 		t.Fatalf("unexpected effective tools: %s", got)
 	}
 }
+
+func TestEffectiveToolNamesReportsPolicyCycles(t *testing.T) {
+	blueprint := DefaultBlueprint()
+	policy := func(id string, x int) Node {
+		return Node{
+			ID:       id,
+			Type:     NodeTypePolicy,
+			Label:    id,
+			Position: Position{X: x, Y: 380},
+			Inputs: []Port{
+				{ID: "toolset_in", Type: PortTypeToolset, Label: "Tools In", Direction: DirectionInput, Multiple: true},
+			},
+			Outputs: []Port{
+				{ID: "toolset_out", Type: PortTypeToolset, Label: "Tools Out", Direction: DirectionOutput},
+			},
+			Config: map[string]any{"deny_tools": []string{"write_file"}},
+		}
+	}
+	blueprint.Nodes = append(blueprint.Nodes, policy("policy-a", 300), policy("policy-b", 460))
+	blueprint.Edges = []Edge{
+		{ID: "edge-policy-a-b", Source: Endpoint{Node: "policy-a", Port: "toolset_out"}, Target: Endpoint{Node: "policy-b", Port: "toolset_in"}},
+		{ID: "edge-policy-b-a", Source: Endpoint{Node: "policy-b", Port: "toolset_out"}, Target: Endpoint{Node: "policy-a", Port: "toolset_in"}},
+		{ID: "edge-policy-agent", Source: Endpoint{Node: "policy-a", Port: "toolset_out"}, Target: Endpoint{Node: "agent-main", Port: "toolset_in"}},
+		{ID: "edge-project-agent", Source: Endpoint{Node: "project-context", Port: "prompt_out"}, Target: Endpoint{Node: "agent-main", Port: "prompt_1"}},
+		{ID: "edge-build-agent", Source: Endpoint{Node: "build-mode", Port: "prompt_out"}, Target: Endpoint{Node: "agent-main", Port: "prompt_2"}},
+	}
+	resolved, err := Resolve(blueprint)
+	if err != nil {
+		t.Fatal(err)
+	}
+	capabilities := EffectiveToolNames(blueprint, resolved)
+	if len(capabilities.Diagnostics) == 0 {
+		t.Fatalf("expected cycle diagnostic, got %+v", capabilities)
+	}
+	if !strings.Contains(capabilities.Diagnostics[0], "tool capability cycle") {
+		t.Fatalf("unexpected diagnostics: %+v", capabilities.Diagnostics)
+	}
+}

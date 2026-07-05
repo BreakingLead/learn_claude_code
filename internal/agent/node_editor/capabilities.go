@@ -6,16 +6,19 @@ import (
 )
 
 type CapabilityResolution struct {
-	ToolNames []string `json:"tool_names"`
-	Resolved  bool     `json:"resolved"`
+	ToolNames   []string `json:"tool_names"`
+	Resolved    bool     `json:"resolved"`
+	Diagnostics []string `json:"diagnostics,omitempty"`
 }
 
 func EffectiveToolNames(blueprint Blueprint, resolved ResolvedAgentDefinition) CapabilityResolution {
 	nodes := nodeMap(blueprint)
 	toolSet := map[string]bool{}
 	resolvedAny := false
+	var diagnostics []string
 	for _, nodeID := range resolved.ToolsetNodes {
-		names, ok := toolNamesForNode(blueprint, nodeID, nodes, nil)
+		names, ok, nodeDiagnostics := toolNamesForNode(blueprint, nodeID, nodes, nil)
+		diagnostics = append(diagnostics, nodeDiagnostics...)
 		if !ok {
 			continue
 		}
@@ -32,35 +35,36 @@ func EffectiveToolNames(blueprint Blueprint, resolved ResolvedAgentDefinition) C
 		names = append(names, name)
 	}
 	sort.Strings(names)
-	return CapabilityResolution{ToolNames: names, Resolved: resolvedAny}
+	return CapabilityResolution{ToolNames: names, Resolved: resolvedAny, Diagnostics: diagnostics}
 }
 
-func toolNamesForNode(blueprint Blueprint, nodeID string, nodes map[string]Node, stack []string) ([]string, bool) {
+func toolNamesForNode(blueprint Blueprint, nodeID string, nodes map[string]Node, stack []string) ([]string, bool, []string) {
 	if containsNodeID(stack, nodeID) {
-		return nil, false
+		return nil, false, []string{"tool capability cycle: " + strings.Join(append(stack, nodeID), " -> ")}
 	}
 	node, ok := nodes[nodeID]
 	if !ok {
-		return nil, false
+		return nil, false, []string{"tool capability node not found: " + nodeID}
 	}
 	switch node.Type {
 	case NodeTypeToolset:
-		return stringSliceNodeConfig(node.Config, "tools"), true
+		return stringSliceNodeConfig(node.Config, "tools"), true, nil
 	case NodeTypePolicy:
-		upstream, upstreamOK := upstreamToolNames(blueprint, node.ID, nodes, append(stack, nodeID))
+		upstream, upstreamOK, diagnostics := upstreamToolNames(blueprint, node.ID, nodes, append(stack, nodeID))
 		if !upstreamOK {
 			upstream = nil
 		}
-		return filterPolicyToolNames(upstream, stringSliceNodeConfig(node.Config, "allow_tools"), stringSliceNodeConfig(node.Config, "deny_tools")), true
+		return filterPolicyToolNames(upstream, stringSliceNodeConfig(node.Config, "allow_tools"), stringSliceNodeConfig(node.Config, "deny_tools")), true, diagnostics
 	default:
 		tools := stringSliceNodeConfig(node.Config, "tools")
-		return tools, len(tools) > 0
+		return tools, len(tools) > 0, nil
 	}
 }
 
-func upstreamToolNames(blueprint Blueprint, nodeID string, nodes map[string]Node, stack []string) ([]string, bool) {
+func upstreamToolNames(blueprint Blueprint, nodeID string, nodes map[string]Node, stack []string) ([]string, bool, []string) {
 	toolSet := map[string]bool{}
 	resolvedAny := false
+	var diagnostics []string
 	for _, edge := range blueprint.Edges {
 		if edge.Target.Node != nodeID {
 			continue
@@ -70,7 +74,8 @@ func upstreamToolNames(blueprint Blueprint, nodeID string, nodes map[string]Node
 		if targetPort.Type != PortTypeToolset || sourcePort.Type != PortTypeToolset {
 			continue
 		}
-		names, ok := toolNamesForNode(blueprint, edge.Source.Node, nodes, stack)
+		names, ok, nodeDiagnostics := toolNamesForNode(blueprint, edge.Source.Node, nodes, stack)
+		diagnostics = append(diagnostics, nodeDiagnostics...)
 		if !ok {
 			continue
 		}
@@ -87,7 +92,7 @@ func upstreamToolNames(blueprint Blueprint, nodeID string, nodes map[string]Node
 		names = append(names, name)
 	}
 	sort.Strings(names)
-	return names, resolvedAny
+	return names, resolvedAny, diagnostics
 }
 
 func filterPolicyToolNames(upstream []string, allow []string, deny []string) []string {
