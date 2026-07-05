@@ -2,6 +2,7 @@ package nodeeditor
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -741,6 +742,9 @@ func TestServerRunWorkflowPlanAPI(t *testing.T) {
 	if len(listPayload.Runs) != 1 || listPayload.Runs[0].ID != payload.Run.ID || listPayload.Runs[0].StartedAt == "" || listPayload.Runs[0].FinishedAt == "" || listPayload.Runs[0].ExecutionMode != "dry_run" || listPayload.Runs[0].TimeoutMS != DefaultWorkflowRunTimeoutMS {
 		t.Fatalf("unexpected run list: %+v", listPayload.Runs)
 	}
+	if listPayload.Runs[0].StepCount != 3 || listPayload.Runs[0].FailedStepID != "" {
+		t.Fatalf("expected successful run summary steps: %+v", listPayload.Runs[0])
+	}
 
 	resp, err = http.Get(server.URL + "/api/workflow-runs/review-pipeline/" + payload.Run.ID)
 	if err != nil {
@@ -859,6 +863,9 @@ func TestServerRunWorkflowPlanPersistsFailures(t *testing.T) {
 	}
 	if len(runs) != 1 || runs[0].ID != payload.Run.ID || runs[0].Status != WorkflowRunStatusFailed || strings.Join(runs[0].ExternalCommand, " ") != scriptPath {
 		t.Fatalf("expected failed run in history: %+v", runs)
+	}
+	if runs[0].StepCount != 1 || runs[0].FailedStepID == "" || !strings.Contains(runs[0].FailedStepError, context.DeadlineExceeded.Error()) {
+		t.Fatalf("expected failed step summary in history: %+v", runs[0])
 	}
 }
 

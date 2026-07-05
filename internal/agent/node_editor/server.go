@@ -69,6 +69,10 @@ type WorkflowRunSummary struct {
 	TimeoutMS       int      `json:"timeout_ms,omitempty"`
 	Status          string   `json:"status,omitempty"`
 	Error           string   `json:"error,omitempty"`
+	StepCount       int      `json:"step_count"`
+	FailedStepID    string   `json:"failed_step_id,omitempty"`
+	FailedStepLabel string   `json:"failed_step_label,omitempty"`
+	FailedStepError string   `json:"failed_step_error,omitempty"`
 	Stale           bool     `json:"stale"`
 	Output          string   `json:"output,omitempty"`
 }
@@ -411,28 +415,43 @@ func (s *Store) ListWorkflowRuns(workflowID string) ([]WorkflowRunSummary, error
 		if err != nil {
 			continue
 		}
-		summaries = append(summaries, WorkflowRunSummary{
-			ID:              run.ID,
-			WorkflowID:      run.WorkflowID,
-			Name:            run.Name,
-			Path:            path,
-			CreatedAt:       run.CreatedAt,
-			StartedAt:       run.StartedAt,
-			FinishedAt:      run.FinishedAt,
-			DurationMS:      run.DurationMS,
-			ExecutionMode:   run.ExecutionMode,
-			ExternalCommand: append([]string(nil), run.ExternalCommand...),
-			TimeoutMS:       run.TimeoutMS,
-			Status:          run.Status,
-			Error:           run.Error,
-			Stale:           run.Stale,
-			Output:          workflowRunSummaryOutput(run),
-		})
+		summaries = append(summaries, workflowRunSummary(run, path))
 	}
 	sort.Slice(summaries, func(i, j int) bool {
 		return summaries[i].CreatedAt > summaries[j].CreatedAt
 	})
 	return summaries, nil
+}
+
+func workflowRunSummary(run WorkflowPlanRun, path string) WorkflowRunSummary {
+	summary := WorkflowRunSummary{
+		ID:              run.ID,
+		WorkflowID:      run.WorkflowID,
+		Name:            run.Name,
+		Path:            path,
+		CreatedAt:       run.CreatedAt,
+		StartedAt:       run.StartedAt,
+		FinishedAt:      run.FinishedAt,
+		DurationMS:      run.DurationMS,
+		ExecutionMode:   run.ExecutionMode,
+		ExternalCommand: append([]string(nil), run.ExternalCommand...),
+		TimeoutMS:       run.TimeoutMS,
+		Status:          run.Status,
+		Error:           run.Error,
+		StepCount:       len(run.Steps),
+		Stale:           run.Stale,
+		Output:          workflowRunSummaryOutput(run),
+	}
+	for _, step := range run.Steps {
+		if step.Status != WorkflowRunStatusFailed && strings.TrimSpace(step.Error) == "" {
+			continue
+		}
+		summary.FailedStepID = step.NodeID
+		summary.FailedStepLabel = step.Label
+		summary.FailedStepError = step.Error
+		break
+	}
+	return summary
 }
 
 func (s *Store) ReadAgent(id string) (Blueprint, error) {

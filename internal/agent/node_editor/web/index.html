@@ -1694,6 +1694,17 @@
           ]);
         };
 
+        const formatWorkflowRunOption = (run) => {
+          const mode = run.execution_mode || "dry_run";
+          const status = run.status || "completed";
+          const steps = run.step_count !== undefined ? ` steps=${run.step_count}` : "";
+          const failed = run.failed_step_label || run.failed_step_id;
+          const failure = failed ? ` failed=${failed}` : "";
+          const duration = run.duration_ms !== undefined ? ` ${run.duration_ms}ms` : "";
+          const stale = run.stale ? " stale" : "";
+          return `${run.created_at || run.id} [${mode}:${status}]${steps}${failure}${duration}${stale}`;
+        };
+
         const renderWorkflowRunResult = () => {
           if (!workflowRunResult) return null;
           if (!workflowRunResult.ok && !workflowRunResult.run) {
@@ -2210,9 +2221,11 @@
                           React.createElement("option", {
                             key: run.id,
                             value: run.id,
-                            title: (run.external_command || []).join(" "),
+                            title: [run.failed_step_error || run.error || "", (run.external_command || []).join(" ")]
+                              .filter(Boolean)
+                              .join("\n"),
                           },
-                            `${run.created_at || run.id} [${run.execution_mode || "dry_run"}:${run.status || "completed"}]${run.stale ? " (stale)" : ""}`
+                            formatWorkflowRunOption(run)
                           )
                         ),
                       ]),
