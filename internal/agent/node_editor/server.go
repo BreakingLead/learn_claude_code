@@ -61,6 +61,7 @@ type BlueprintValidationResponse struct {
 	Resolved     ResolvedAgentDefinition  `json:"resolved,omitempty"`
 	Expanded     Blueprint                `json:"expanded,omitempty"`
 	Capabilities CapabilityResolution     `json:"capabilities,omitempty"`
+	PromptBlocks []PromptPreviewBlock     `json:"prompt_blocks,omitempty"`
 	Runtime      BlueprintRuntimeSelector `json:"runtime,omitempty"`
 }
 
@@ -204,6 +205,7 @@ func (s *Store) ValidateBlueprintForRuntime(blueprint Blueprint) BlueprintValida
 		Resolved:     resolved,
 		Expanded:     expanded,
 		Capabilities: EffectiveToolNames(expanded, resolved),
+		PromptBlocks: PromptPreview(expanded, resolved),
 		Runtime:      s.RuntimeSelector(blueprint.ID),
 	}
 }

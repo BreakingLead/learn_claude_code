@@ -824,6 +824,7 @@
           const tools = validationResult.capabilities?.tool_names || [];
           const diagnostics = validationResult.capabilities?.diagnostics || [];
           const policies = validationResult.capabilities?.policies || [];
+          const promptBlocks = validationResult.prompt_blocks || [];
           const runtimeCommand = validationResult.runtime?.command || "";
           return React.createElement("div", { className: "validation", key: "validation" }, [
             React.createElement("div", { className: "validation-title", key: "title" },
@@ -851,6 +852,16 @@
                     (policy.dropped_tools || []).length > 0
                       ? React.createElement("div", { className: "diagnostics", key: "dropped" }, `dropped: ${policy.dropped_tools.join(", ")}`)
                       : React.createElement("div", { className: "muted", key: "dropped" }, "dropped: (none)"),
+                  ])),
+                ])
+              : null,
+            promptBlocks.length > 0
+              ? React.createElement("div", { className: "field", key: "prompt-preview" }, [
+                  React.createElement("label", { key: "label" }, "Prompt preview"),
+                  ...promptBlocks.map((block, index) => React.createElement("div", { className: "validation", key: `${block.node_id}-${index}` }, [
+                    React.createElement("div", { className: "validation-title", key: "title" }, `${index + 1}. ${block.name || block.node_id}`),
+                    React.createElement("div", { className: "muted", key: "source" }, `source: ${block.source || "(unknown)"}`),
+                    React.createElement("div", { className: "muted", key: "preview" }, block.preview || "(empty)"),
                   ])),
                 ])
               : null,

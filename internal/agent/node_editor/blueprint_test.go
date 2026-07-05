@@ -235,3 +235,46 @@ func TestEffectiveToolNamesReportsPolicyCycles(t *testing.T) {
 		t.Fatalf("unexpected diagnostics: %+v", capabilities.Diagnostics)
 	}
 }
+
+func TestPromptPreviewIncludesOrderedPromptAndMemoryNodes(t *testing.T) {
+	blueprint := DefaultBlueprint()
+	blueprint.Nodes = append(blueprint.Nodes,
+		Node{
+			ID:       "policy-prompt",
+			Type:     NodeTypePolicy,
+			Label:    "Plan Policy",
+			Position: Position{X: 300, Y: 260},
+			Outputs:  []Port{{ID: "prompt_out", Type: PortTypePrompt, Label: "Prompt", Direction: DirectionOutput}},
+			Config:   map[string]any{"prompt": "Plan before editing."},
+		},
+		Node{
+			ID:       "memory",
+			Type:     NodeTypeMemory,
+			Label:    "Memory",
+			Position: Position{X: 300, Y: 420},
+			Outputs:  []Port{{ID: "memory_out", Type: PortTypeMemory, Label: "Memory", Direction: DirectionOutput}},
+			Config:   map[string]any{"source": "default_memory"},
+		},
+	)
+	blueprint.Edges = append(blueprint.Edges,
+		Edge{ID: "edge-policy-prompt", Source: Endpoint{Node: "policy-prompt", Port: "prompt_out"}, Target: Endpoint{Node: "agent-main", Port: "prompt_3"}},
+		Edge{ID: "edge-memory", Source: Endpoint{Node: "memory", Port: "memory_out"}, Target: Endpoint{Node: "agent-main", Port: "memory_in"}},
+	)
+	resolved, err := Resolve(blueprint)
+	if err != nil {
+		t.Fatal(err)
+	}
+	blocks := PromptPreview(blueprint, resolved)
+	if got := len(blocks); got != 4 {
+		t.Fatalf("blocks = %d, want 4: %+v", got, blocks)
+	}
+	if blocks[0].NodeID != "project-context" || blocks[2].NodeID != "policy-prompt" {
+		t.Fatalf("unexpected prompt order: %+v", blocks)
+	}
+	if blocks[2].Source != "blueprint policy" || !strings.Contains(blocks[2].Preview, "Plan before editing") {
+		t.Fatalf("unexpected policy preview: %+v", blocks[2])
+	}
+	if blocks[3].Source != "memory index" {
+		t.Fatalf("unexpected memory preview: %+v", blocks[3])
+	}
+}

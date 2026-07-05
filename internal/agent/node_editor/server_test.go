@@ -72,6 +72,9 @@ func TestServerBlueprintAPI(t *testing.T) {
 	if validation.Expanded.ID != "default" || validation.Resolved.ID != "agent-main" {
 		t.Fatalf("expected expanded/resolved validation payload, got %+v", validation)
 	}
+	if len(validation.PromptBlocks) == 0 || validation.PromptBlocks[0].NodeID != "project-context" {
+		t.Fatalf("expected prompt preview blocks, got %+v", validation.PromptBlocks)
+	}
 	if validation.Runtime.ID != "default" || !strings.Contains(validation.Runtime.Command, "BEE_AGENT_BLUEPRINT_ID=default") {
 		t.Fatalf("expected runtime selector, got %+v", validation.Runtime)
 	}
@@ -133,6 +136,9 @@ func TestStoreValidateBlueprintForRuntime(t *testing.T) {
 	}
 	if !response.Capabilities.Resolved || !containsNodeID(response.Capabilities.ToolNames, "read_file") {
 		t.Fatalf("unexpected capabilities: %+v", response.Capabilities)
+	}
+	if len(response.PromptBlocks) == 0 {
+		t.Fatalf("expected prompt preview blocks, got %+v", response.PromptBlocks)
 	}
 }
 
