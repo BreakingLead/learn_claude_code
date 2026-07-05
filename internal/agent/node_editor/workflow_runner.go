@@ -201,6 +201,7 @@ func (e PlanExecutor) Execute(ctx context.Context, plan WorkflowCompiledPlan, in
 	}
 	runStart := time.Now()
 	messages := map[string]string{}
+	producedMessages := workflowProducedMessageEndpoints(plan)
 	planSnapshot := plan
 	run := WorkflowPlanRun{
 		WorkflowID:   plan.WorkflowID,
@@ -218,8 +219,15 @@ func (e PlanExecutor) Execute(ctx context.Context, plan WorkflowCompiledPlan, in
 		if err := ctx.Err(); err != nil {
 			return failWorkflowPlanRun(run, err), err
 		}
-		stepInputs := workflowPlanRunInputs(agentRun.Inputs, messages, input)
 		stepStart := time.Now()
+		stepInputs, err := workflowPlanRunInputs(agentRun.Inputs, messages, input, producedMessages)
+		if err != nil {
+			err = fmt.Errorf("prepare agent %q inputs: %w", agentRun.NodeID, err)
+			stepFinish := time.Now()
+			step := newWorkflowPlanRunStep(agentRun, stepInputs, stepStart, stepFinish)
+			run.Steps = append(run.Steps, failWorkflowPlanRunStep(step, err))
+			return failWorkflowPlanRun(run, err), err
+		}
 		result, err := invoker.InvokeAgent(ctx, AgentInvocation{Run: agentRun, Inputs: stepInputs})
 		stepFinish := time.Now()
 		step := newWorkflowPlanRunStep(agentRun, stepInputs, stepStart, stepFinish)
@@ -242,7 +250,11 @@ func (e PlanExecutor) Execute(ctx context.Context, plan WorkflowCompiledPlan, in
 	}
 
 	for _, output := range plan.Outputs {
-		inputs := workflowPlanRunInputs(output.Inputs, messages, input)
+		inputs, err := workflowPlanRunInputs(output.Inputs, messages, input, producedMessages)
+		if err != nil {
+			err = fmt.Errorf("prepare output %q inputs: %w", output.NodeID, err)
+			return failWorkflowPlanRun(run, err), err
+		}
 		run.Outputs = append(run.Outputs, WorkflowPlanRunOutput{
 			NodeID:  output.NodeID,
 			Label:   output.Label,
@@ -360,12 +372,15 @@ func (i ExternalCommandAgentInvoker) InvokeAgent(ctx context.Context, invocation
 	return result, nil
 }
 
-func workflowPlanRunInputs(inputs []WorkflowCompiledInput, messages map[string]string, fallback string) []WorkflowPlanRunInput {
+func workflowPlanRunInputs(inputs []WorkflowCompiledInput, messages map[string]string, fallback string, producedMessages map[string]bool) ([]WorkflowPlanRunInput, error) {
 	runInputs := make([]WorkflowPlanRunInput, 0, len(inputs))
 	for _, input := range inputs {
 		key := endpointKey(Endpoint{Node: input.FromNode, Port: input.FromPort})
 		content, ok := messages[key]
 		if !ok {
+			if producedMessages[key] {
+				return runInputs, fmt.Errorf("missing upstream message %s.%s", input.FromNode, input.FromPort)
+			}
 			content = fallback
 			messages[key] = content
 		}
@@ -376,7 +391,17 @@ func workflowPlanRunInputs(inputs []WorkflowCompiledInput, messages map[string]s
 			Content:    content,
 		})
 	}
-	return runInputs
+	return runInputs, nil
+}
+
+func workflowProducedMessageEndpoints(plan WorkflowCompiledPlan) map[string]bool {
+	produced := map[string]bool{}
+	for _, run := range plan.AgentRuns {
+		for _, output := range run.Outputs {
+			produced[endpointKey(Endpoint{Node: run.NodeID, Port: output.Port})] = true
+		}
+	}
+	return produced
 }
 
 func workflowPlanDryRunContent(run WorkflowCompiledRun, inputs []WorkflowPlanRunInput) string {

@@ -43,7 +43,7 @@ func TestRunCompiledWorkflowPlanPropagatesMessages(t *testing.T) {
 				Label:       "Reviewer",
 				BlueprintID: "default",
 				Instruction: "Review the change.",
-				Inputs:      []WorkflowCompiledInput{{FromNode: "prompt", FromPort: "message", TargetPort: "input"}},
+				Inputs:      []WorkflowCompiledInput{{FromNode: "developer", FromPort: "output", TargetPort: "input"}},
 				Outputs:     []WorkflowCompiledRunOutput{{Port: "output", To: []Endpoint{{Node: "summary", Port: "input"}}}},
 			},
 			{
@@ -72,6 +72,9 @@ func TestRunCompiledWorkflowPlanPropagatesMessages(t *testing.T) {
 	if !strings.Contains(run.Steps[0].Outputs[0].Content, "build the API") {
 		t.Fatalf("expected initial input in first agent output: %+v", run.Steps[0])
 	}
+	if len(run.Steps[1].Inputs) != 1 || !strings.Contains(run.Steps[1].Inputs[0].Content, "Developer") {
+		t.Fatalf("expected reviewer to receive developer output: %+v", run.Steps[1])
+	}
 	summary := run.Steps[2]
 	if len(summary.Inputs) != 2 {
 		t.Fatalf("expected summary to receive both upstream outputs: %+v", summary)
@@ -81,6 +84,37 @@ func TestRunCompiledWorkflowPlanPropagatesMessages(t *testing.T) {
 	}
 	if len(run.Outputs) != 1 || !strings.Contains(run.Outputs[0].Content, "Summary") {
 		t.Fatalf("unexpected final output: %+v", run.Outputs)
+	}
+}
+
+func TestPlanExecutorRejectsMissingUpstreamAgentOutput(t *testing.T) {
+	executor := PlanExecutor{Invoker: &recordingInvoker{}}
+	plan := WorkflowCompiledPlan{
+		WorkflowID: "review-pipeline",
+		Name:       "Review Pipeline",
+		AgentRuns: []WorkflowCompiledRun{
+			{
+				NodeID:  "reviewer",
+				Inputs:  []WorkflowCompiledInput{{FromNode: "developer", FromPort: "output", TargetPort: "input"}},
+				Outputs: []WorkflowCompiledRunOutput{{Port: "output"}},
+			},
+			{
+				NodeID:  "developer",
+				Inputs:  []WorkflowCompiledInput{{FromNode: "prompt", FromPort: "message", TargetPort: "input"}},
+				Outputs: []WorkflowCompiledRunOutput{{Port: "output"}},
+			},
+		},
+	}
+
+	run, err := executor.Execute(context.Background(), plan, "build the API")
+	if err == nil {
+		t.Fatal("expected missing upstream output error")
+	}
+	if !strings.Contains(err.Error(), "missing upstream message developer.output") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if run.Status != WorkflowRunStatusFailed || len(run.Steps) != 1 || run.Steps[0].NodeID != "reviewer" {
+		t.Fatalf("expected failed reviewer step, got %+v", run)
 	}
 }
 

@@ -103,7 +103,7 @@ func DefaultWorkflow() WorkflowDefinition {
 				Inputs:         []Port{{ID: "input", Type: PortTypeMessage, Label: "Input", Direction: DirectionInput}},
 				Outputs:        []Port{{ID: "output", Type: PortTypeMessage, Label: "Output", Direction: DirectionOutput}},
 				Config: map[string]any{
-					"instruction": "Review the requested change independently and emit risks, regressions, and test gaps.",
+					"instruction": "Review the developer output and emit risks, regressions, and test gaps.",
 				},
 			},
 			{
@@ -128,7 +128,7 @@ func DefaultWorkflow() WorkflowDefinition {
 		},
 		Edges: []Edge{
 			{ID: "edge-prompt-developer", Source: Endpoint{Node: "prompt", Port: "message"}, Target: Endpoint{Node: "developer", Port: "input"}},
-			{ID: "edge-prompt-reviewer", Source: Endpoint{Node: "prompt", Port: "message"}, Target: Endpoint{Node: "reviewer", Port: "input"}},
+			{ID: "edge-developer-reviewer", Source: Endpoint{Node: "developer", Port: "output"}, Target: Endpoint{Node: "reviewer", Port: "input"}},
 			{ID: "edge-developer-summary", Source: Endpoint{Node: "developer", Port: "output"}, Target: Endpoint{Node: "summary", Port: "input"}},
 			{ID: "edge-reviewer-summary", Source: Endpoint{Node: "reviewer", Port: "output"}, Target: Endpoint{Node: "summary", Port: "input"}},
 			{ID: "edge-summary-output", Source: Endpoint{Node: "summary", Port: "output"}, Target: Endpoint{Node: "output", Port: "message"}},

@@ -23,7 +23,7 @@ func TestDefaultWorkflowValidatesAndOrders(t *testing.T) {
 		}
 	}
 	if indexOf(order, "prompt") > indexOf(order, "developer") ||
-		indexOf(order, "prompt") > indexOf(order, "reviewer") ||
+		indexOf(order, "developer") > indexOf(order, "reviewer") ||
 		indexOf(order, "developer") > indexOf(order, "summary") ||
 		indexOf(order, "reviewer") > indexOf(order, "summary") ||
 		indexOf(order, "summary") > indexOf(order, "output") {
@@ -49,6 +49,10 @@ func TestWorkflowExecutionPlanShowsDataFlow(t *testing.T) {
 	if !containsNodeID(summary.OutputsTo, "output") {
 		t.Fatalf("unexpected summary outputs: %+v", summary)
 	}
+	reviewer := workflowStepByNodeID(steps, "reviewer")
+	if !containsNodeID(reviewer.InputsFrom, "developer") {
+		t.Fatalf("expected reviewer to depend on developer output: %+v", reviewer)
+	}
 	if !strings.Contains(summary.Instruction, "Merge upstream") {
 		t.Fatalf("expected summary instruction in execution plan, got %+v", summary)
 	}
@@ -72,6 +76,13 @@ func TestSimulateWorkflowShowsMessageHandoff(t *testing.T) {
 	}
 	if !strings.Contains(developer.Outputs[0].Content, "Implement the requested change") {
 		t.Fatalf("expected developer instruction in simulation output: %+v", developer)
+	}
+	reviewer := workflowSimulationStepByNodeID(steps, "reviewer")
+	if len(reviewer.Inputs) != 1 || reviewer.Inputs[0].FromNode != "developer" {
+		t.Fatalf("expected reviewer to consume developer output: %+v", reviewer)
+	}
+	if !strings.Contains(reviewer.Inputs[0].Content, "Developer Agent") {
+		t.Fatalf("expected developer content in reviewer input: %+v", reviewer.Inputs)
 	}
 	output := workflowSimulationStepByNodeID(steps, "output")
 	if len(output.Inputs) != 1 || output.Inputs[0].FromNode != "summary" {

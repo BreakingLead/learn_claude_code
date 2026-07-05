@@ -75,7 +75,7 @@
         }
       ],
       "config": {
-        "instruction": "Review the requested change independently and emit risks, regressions, and test gaps."
+        "instruction": "Review the developer output and emit risks, regressions, and test gaps."
       }
     },
     {
@@ -139,10 +139,10 @@
       }
     },
     {
-      "id": "edge-prompt-reviewer",
+      "id": "edge-developer-reviewer",
       "source": {
-        "node": "prompt",
-        "port": "message"
+        "node": "developer",
+        "port": "output"
       },
       "target": {
         "node": "reviewer",
