@@ -70,6 +70,51 @@ func TestServerBlueprintAPI(t *testing.T) {
 	}
 }
 
+func TestServerCreateBlueprintAPI(t *testing.T) {
+	workdir := t.TempDir()
+	path := DefaultBlueprintPath(workdir)
+	if _, err := EnsureDefaultBlueprint(path); err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(NewServer(workdir).Handler())
+	defer server.Close()
+
+	request := CreateBlueprintRequest{
+		ID:       "review-agent",
+		Name:     "Review Agent",
+		SourceID: "default",
+	}
+	raw, err := json.Marshal(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := http.Post(server.URL+"/api/blueprints", "application/json", bytes.NewReader(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("status = %d, want 201", resp.StatusCode)
+	}
+	var payload struct {
+		OK        bool      `json:"ok"`
+		Blueprint Blueprint `json:"blueprint"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatal(err)
+	}
+	if !payload.OK || payload.Blueprint.ID != "review-agent" || payload.Blueprint.Name != "Review Agent" {
+		t.Fatalf("unexpected payload: %+v", payload)
+	}
+	stored, err := NewStore(workdir).ReadAgent("review-agent")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.RootAgent != "agent-main" {
+		t.Fatalf("unexpected stored blueprint: %+v", stored)
+	}
+}
+
 func TestServerNodeTemplatesAPI(t *testing.T) {
 	workdir := t.TempDir()
 	store := NewStore(workdir)

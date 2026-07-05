@@ -103,6 +103,7 @@
       }
 
       input,
+      select,
       textarea {
         width: 100%;
         border: 1px solid #303746;
@@ -112,6 +113,12 @@
         background: #0d0f14;
         color: #e6e9ef;
         font: inherit;
+      }
+
+      select {
+        height: 30px;
+        min-width: 160px;
+        padding: 0 8px;
       }
 
       textarea {
@@ -496,6 +503,8 @@
         const selectedNode = (blueprint?.nodes || []).find((node) => node.id === selectedNodeId) || null;
         const [configDraft, setConfigDraft] = useState("");
         const [templates, setTemplates] = useState(fallbackTemplates);
+        const [blueprints, setBlueprints] = useState([]);
+        const [activeBlueprintId, setActiveBlueprintId] = useState("default");
 
         const updateDocument = useCallback((next, message) => {
           setBlueprint(next);
@@ -507,17 +516,24 @@
 
         const setBlueprintDocument = useCallback((next, message) => {
           updateDocument(next, message);
-          if (selectedNodeId && !(next.nodes || []).some((node) => node.id === selectedNodeId)) {
-            setSelectedNodeId("");
-          }
+          setSelectedNodeId((id) => id && !(next.nodes || []).some((node) => node.id === id) ? "" : id);
           setSelectedNodeIds((ids) => ids.filter((id) => (next.nodes || []).some((node) => node.id === id)));
-        }, [selectedNodeId, updateDocument]);
+        }, [updateDocument]);
 
-        const load = useCallback(async () => {
-          const response = await fetch("/api/blueprints/default");
+        const loadBlueprint = useCallback(async (id) => {
+          const response = await fetch(`/api/blueprints/${id}`);
           const data = await response.json();
-          setBlueprintDocument(data, "loaded default blueprint");
+          if (!response.ok) throw new Error(data.error || response.statusText);
+          setActiveBlueprintId(data.id);
+          setBlueprintDocument(data, `loaded ${data.id}`);
         }, [setBlueprintDocument]);
+
+        const loadBlueprints = useCallback(async () => {
+          const response = await fetch("/api/blueprints");
+          const data = await response.json();
+          if (!response.ok) throw new Error(data.error || response.statusText);
+          setBlueprints(Array.isArray(data.blueprints) ? data.blueprints : []);
+        }, []);
 
         const loadTemplates = useCallback(async () => {
           try {
@@ -532,8 +548,9 @@
         }, []);
 
         useEffect(() => {
-          load().catch((error) => setStatus(`load failed: ${error.message}`));
-        }, [load]);
+          loadBlueprints().catch((error) => setStatus(`list failed: ${error.message}`));
+          loadBlueprint("default").catch((error) => setStatus(`load failed: ${error.message}`));
+        }, [loadBlueprint, loadBlueprints]);
 
         useEffect(() => {
           loadTemplates();
@@ -721,6 +738,31 @@
           }
         };
 
+        const createBlueprint = async (sourceID) => {
+          try {
+            const defaultName = sourceID ? `${blueprint?.name || sourceID} Copy` : "New Agent";
+            const name = window.prompt("Blueprint name", defaultName);
+            if (name === null) return;
+            const id = window.prompt("Blueprint id", slug(name || defaultName));
+            if (id === null) return;
+            const response = await fetch("/api/blueprints", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ id, name, source_id: sourceID || "" }),
+            });
+            const result = await response.json();
+            if (!response.ok || !result.ok) {
+              setStatus(`create failed: ${result.error || response.statusText}`);
+              return;
+            }
+            await loadBlueprints();
+            setActiveBlueprintId(result.blueprint.id);
+            setBlueprintDocument(result.blueprint, `created ${result.blueprint.id}`);
+          } catch (error) {
+            setStatus(`create failed: ${error.message}`);
+          }
+        };
+
         const save = async () => {
           try {
             const next = parseSource();
@@ -730,7 +772,13 @@
               body: JSON.stringify(next),
             });
             const result = await response.json();
-            setStatus(result.ok ? "saved" : `save failed: ${result.error}`);
+            if (result.ok) {
+              setActiveBlueprintId(next.id);
+              await loadBlueprints();
+              setStatus("saved");
+            } else {
+              setStatus(`save failed: ${result.error}`);
+            }
           } catch (error) {
             setStatus(`save failed: ${error.message}`);
           }
@@ -739,10 +787,25 @@
         return React.createElement("div", { className: "app" }, [
           React.createElement("div", { className: "topbar", key: "topbar" }, [
             React.createElement("div", { className: "brand", key: "brand" }, "Bee Agent Builder"),
+            React.createElement("select", {
+              key: "blueprint-select",
+              value: activeBlueprintId,
+              onChange: (event) => loadBlueprint(event.target.value).catch((error) => setStatus(`load failed: ${error.message}`)),
+            }, blueprints.map((item) =>
+              React.createElement("option", { key: item.id, value: item.id }, item.name ? `${item.name} (${item.id})` : item.id)
+            )),
+            React.createElement("div", { className: "actions", key: "blueprint-actions" }, [
+              React.createElement("button", { key: "new", onClick: () => createBlueprint("") }, "New"),
+              React.createElement("button", {
+                key: "duplicate",
+                disabled: !activeBlueprintId,
+                onClick: () => createBlueprint(activeBlueprintId),
+              }, "Duplicate"),
+            ]),
             React.createElement("div", { className: "actions", key: "palette" },
               templates.map((template) =>
                 React.createElement("button", {
-                  key: `add-${template.type}`,
+                  key: `add-${template.type}-${template.node?.config?.definition || template.label}`,
                   title: template.description || template.label,
                   onClick: () => addNode(template),
                 }, `+ ${template.label}`)

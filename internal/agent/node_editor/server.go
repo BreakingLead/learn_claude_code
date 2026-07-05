@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
@@ -33,6 +34,12 @@ type CompositeSummary struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
 	Path string `json:"path"`
+}
+
+type CreateBlueprintRequest struct {
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	SourceID string `json:"source_id,omitempty"`
 }
 
 type CompositeFromSelectionRequest struct {
@@ -94,6 +101,9 @@ func (s *Store) ListAgents() ([]BlueprintSummary, error) {
 			Path: path,
 		})
 	}
+	sort.Slice(summaries, func(i, j int) bool {
+		return summaries[i].ID < summaries[j].ID
+	})
 	return summaries, nil
 }
 
@@ -121,6 +131,9 @@ func (s *Store) ListComposites() ([]CompositeSummary, error) {
 			Path: path,
 		})
 	}
+	sort.Slice(summaries, func(i, j int) bool {
+		return summaries[i].ID < summaries[j].ID
+	})
 	return summaries, nil
 }
 
@@ -144,6 +157,49 @@ func (s *Store) WriteAgent(id string, blueprint Blueprint) error {
 		return err
 	}
 	return WriteBlueprint(path, blueprint)
+}
+
+func (s *Store) CreateAgent(request CreateBlueprintRequest) (Blueprint, error) {
+	id := safeID(request.ID)
+	if id == "" {
+		return Blueprint{}, fmt.Errorf("blueprint id is required")
+	}
+	path, err := s.AgentPath(id)
+	if err != nil {
+		return Blueprint{}, err
+	}
+	if _, err := os.Stat(path); err == nil {
+		return Blueprint{}, fmt.Errorf("blueprint %q already exists", id)
+	} else if !os.IsNotExist(err) {
+		return Blueprint{}, err
+	}
+
+	var blueprint Blueprint
+	if strings.TrimSpace(request.SourceID) != "" {
+		blueprint, err = s.ReadAgent(request.SourceID)
+		if err != nil {
+			return Blueprint{}, fmt.Errorf("read source blueprint %q: %w", request.SourceID, err)
+		}
+	} else {
+		blueprint = DefaultBlueprint()
+	}
+	blueprint.ID = id
+	if strings.TrimSpace(request.Name) != "" {
+		blueprint.Name = strings.TrimSpace(request.Name)
+	} else if strings.TrimSpace(blueprint.Name) == "" || strings.TrimSpace(request.SourceID) == "" {
+		blueprint.Name = id
+	}
+	if blueprint.Metadata == nil {
+		blueprint.Metadata = map[string]any{}
+	}
+	blueprint.Metadata["created_by"] = "node_editor"
+	if request.SourceID != "" {
+		blueprint.Metadata["copied_from"] = request.SourceID
+	}
+	if err := s.WriteAgent(id, blueprint); err != nil {
+		return Blueprint{}, err
+	}
+	return blueprint, nil
 }
 
 func (s *Store) LoadComposite(id string) (CompositeDefinition, error) {
@@ -176,6 +232,7 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/node-templates", s.handleNodeTemplates)
 	mux.HandleFunc("GET /api/blueprints", s.handleListBlueprints)
+	mux.HandleFunc("POST /api/blueprints", s.handleCreateBlueprint)
 	mux.HandleFunc("GET /api/blueprints/{id}", s.handleGetBlueprint)
 	mux.HandleFunc("PUT /api/blueprints/{id}", s.handlePutBlueprint)
 	mux.HandleFunc("POST /api/blueprints/{id}/validate", s.handleValidateBlueprint)
@@ -210,6 +267,20 @@ func (s *Server) handleListBlueprints(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"blueprints": summaries})
+}
+
+func (s *Server) handleCreateBlueprint(w http.ResponseWriter, r *http.Request) {
+	request, err := decodeCreateBlueprint(r.Body)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	blueprint, err := s.store.CreateAgent(request)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]any{"ok": true, "blueprint": blueprint})
 }
 
 func (s *Server) handleGetBlueprint(w http.ResponseWriter, r *http.Request) {
@@ -315,6 +386,17 @@ func decodeBlueprint(body io.Reader) (Blueprint, error) {
 		return Blueprint{}, err
 	}
 	return blueprint, nil
+}
+
+func decodeCreateBlueprint(body io.Reader) (CreateBlueprintRequest, error) {
+	defer io.Copy(io.Discard, body)
+	var request CreateBlueprintRequest
+	decoder := json.NewDecoder(body)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&request); err != nil {
+		return CreateBlueprintRequest{}, err
+	}
+	return request, nil
 }
 
 func decodeComposite(body io.Reader) (CompositeDefinition, error) {
