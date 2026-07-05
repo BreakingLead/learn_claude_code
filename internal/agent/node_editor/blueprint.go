@@ -23,6 +23,7 @@ const (
 	PortTypeToolset = "toolset"
 	PortTypeMemory  = "memory"
 	PortTypeOutput  = "output"
+	PortTypeMessage = "message"
 
 	DirectionInput  = "input"
 	DirectionOutput = "output"
