@@ -1484,6 +1484,9 @@
             compiledPlanPath
               ? React.createElement("div", { className: "muted", key: "path" }, `saved: ${compiledPlanPath}`)
               : null,
+            plan.source_hash
+              ? React.createElement("div", { className: "muted", key: "source-hash" }, `source hash: ${plan.source_hash.slice(0, 12)}`)
+              : null,
             React.createElement("div", { className: "muted", key: "order" }, `order: ${(plan.order || []).join(" -> ") || "(empty)"}`),
             (plan.diagnostics || []).length > 0
               ? React.createElement("div", { className: "diagnostics", key: "diagnostics" },

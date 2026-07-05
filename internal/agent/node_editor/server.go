@@ -1,7 +1,9 @@
 package nodeeditor
 
 import (
+	"crypto/sha256"
 	"embed"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -114,6 +116,7 @@ type WorkflowCompiledPlanSaveResponse struct {
 type WorkflowCompiledPlan struct {
 	WorkflowID  string                   `json:"workflow_id"`
 	Name        string                   `json:"name"`
+	SourceHash  string                   `json:"source_hash"`
 	Order       []string                 `json:"order"`
 	AgentRuns   []WorkflowCompiledRun    `json:"agent_runs"`
 	Diagnostics []string                 `json:"diagnostics,omitempty"`
@@ -574,6 +577,10 @@ func (s *Store) CompileWorkflow(workflow WorkflowDefinition) (WorkflowCompiledPl
 	if err := s.ValidateWorkflowAgentReferences(workflow); err != nil {
 		return WorkflowCompiledPlan{}, err
 	}
+	sourceHash, err := workflowSourceHash(workflow)
+	if err != nil {
+		return WorkflowCompiledPlan{}, err
+	}
 	nodes := map[string]WorkflowNode{}
 	incoming := map[string][]Edge{}
 	outgoing := map[string][]Edge{}
@@ -592,6 +599,7 @@ func (s *Store) CompileWorkflow(workflow WorkflowDefinition) (WorkflowCompiledPl
 	plan := WorkflowCompiledPlan{
 		WorkflowID:  workflow.ID,
 		Name:        workflow.Name,
+		SourceHash:  sourceHash,
 		Order:       order,
 		Diagnostics: WorkflowDiagnostics(workflow),
 	}
@@ -1106,6 +1114,15 @@ func compileWorkflowRunOutputs(ports []Port, edges []Edge) []WorkflowCompiledRun
 		})
 	}
 	return outputs
+}
+
+func workflowSourceHash(workflow WorkflowDefinition) (string, error) {
+	raw, err := json.Marshal(workflow)
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(raw)
+	return hex.EncodeToString(sum[:]), nil
 }
 
 func writeCompiledWorkflowPlan(path string, plan WorkflowCompiledPlan) error {

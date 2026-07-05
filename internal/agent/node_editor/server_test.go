@@ -467,6 +467,9 @@ func TestServerWorkflowCompileAPI(t *testing.T) {
 	if !payload.OK || payload.Plan.WorkflowID != "review-pipeline" {
 		t.Fatalf("unexpected compile payload: %+v", payload)
 	}
+	if payload.Plan.SourceHash == "" {
+		t.Fatalf("expected source hash in compiled plan: %+v", payload.Plan)
+	}
 	if len(payload.Plan.AgentRuns) != 3 {
 		t.Fatalf("expected three compiled agent runs, got %+v", payload.Plan.AgentRuns)
 	}
@@ -509,6 +512,9 @@ func TestServerSaveCompiledWorkflowPlanAPI(t *testing.T) {
 	if !payload.OK || payload.Path == "" || payload.Plan.WorkflowID != "review-pipeline" {
 		t.Fatalf("unexpected save payload: %+v", payload)
 	}
+	if payload.Plan.SourceHash == "" {
+		t.Fatalf("expected source hash in save payload: %+v", payload.Plan)
+	}
 	rawPlan, err := os.ReadFile(payload.Path)
 	if err != nil {
 		t.Fatal(err)
@@ -519,6 +525,9 @@ func TestServerSaveCompiledWorkflowPlanAPI(t *testing.T) {
 	}
 	if stored.WorkflowID != "review-pipeline" || len(stored.AgentRuns) != 3 {
 		t.Fatalf("unexpected stored compiled plan: %+v", stored)
+	}
+	if stored.SourceHash != payload.Plan.SourceHash {
+		t.Fatalf("stored source hash = %q, want %q", stored.SourceHash, payload.Plan.SourceHash)
 	}
 }
 
@@ -563,6 +572,9 @@ func TestServerWorkflowPlanListAndGetAPI(t *testing.T) {
 	}
 	if plan.WorkflowID != "review-pipeline" || len(plan.AgentRuns) != 3 {
 		t.Fatalf("unexpected workflow plan: %+v", plan)
+	}
+	if plan.SourceHash == "" {
+		t.Fatalf("expected source hash in workflow plan: %+v", plan)
 	}
 }
 
