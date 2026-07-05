@@ -441,6 +441,35 @@ func TestServerCreateWorkflowAPI(t *testing.T) {
 	}
 }
 
+func TestServerDeleteWorkflowAPI(t *testing.T) {
+	workdir := t.TempDir()
+	if _, err := EnsureDefaultBlueprint(DefaultBlueprintPath(workdir)); err != nil {
+		t.Fatal(err)
+	}
+	store := NewStore(workdir)
+	if err := store.WriteWorkflow("review-pipeline", DefaultWorkflow()); err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(NewServer(workdir).Handler())
+	defer server.Close()
+
+	req, err := http.NewRequest(http.MethodDelete, server.URL+"/api/workflows/review-pipeline", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("delete workflow status = %d", resp.StatusCode)
+	}
+	if _, err := store.ReadWorkflow("review-pipeline"); err == nil {
+		t.Fatal("expected workflow to be deleted")
+	}
+}
+
 func TestServerPutWorkflowValidatesRouteID(t *testing.T) {
 	workdir := t.TempDir()
 	server := httptest.NewServer(NewServer(workdir).Handler())

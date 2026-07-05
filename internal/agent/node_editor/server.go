@@ -348,6 +348,20 @@ func (s *Store) ReadWorkflow(id string) (WorkflowDefinition, error) {
 	return ReadWorkflow(path)
 }
 
+func (s *Store) DeleteWorkflow(id string) error {
+	path, err := s.WorkflowPath(id)
+	if err != nil {
+		return err
+	}
+	if err := os.Remove(path); err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("workflow %q not found", id)
+		}
+		return err
+	}
+	return nil
+}
+
 func (s *Store) CreateWorkflow(request CreateBlueprintRequest) (WorkflowDefinition, error) {
 	id := safeID(request.ID)
 	if id == "" {
@@ -486,6 +500,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/workflows", s.handleCreateWorkflow)
 	mux.HandleFunc("GET /api/workflows/{id}", s.handleGetWorkflow)
 	mux.HandleFunc("PUT /api/workflows/{id}", s.handlePutWorkflow)
+	mux.HandleFunc("DELETE /api/workflows/{id}", s.handleDeleteWorkflow)
 	mux.HandleFunc("POST /api/workflows/{id}/validate", s.handleValidateWorkflow)
 	static, _ := fs.Sub(webFS, "web")
 	mux.Handle("GET /", http.FileServer(http.FS(static)))
@@ -649,6 +664,14 @@ func (s *Server) handlePutWorkflow(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.store.WriteWorkflow(r.PathValue("id"), workflow); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func (s *Server) handleDeleteWorkflow(w http.ResponseWriter, r *http.Request) {
+	if err := s.store.DeleteWorkflow(r.PathValue("id")); err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}

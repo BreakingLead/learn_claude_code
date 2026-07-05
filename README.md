@@ -123,7 +123,7 @@ Policy Node 是能力转换节点：从上游 `toolset` 输入收集工具，用
 
 Composite Node 定义存放在 `.agents/blueprints/composites/*.json`，可以把一组节点打包成可复用节点。Web UI 支持多选节点后点击 `Create Composite`，后端会根据选择集生成 composite 的内部节点、内部边和跨边界 typed ports，然后把当前图里的选择集替换成一个 composite 实例；右侧面板也可以切换到 `Composites` 直接查看和编辑 composite JSON。仓库自带 `safe-readonly-workspace.json` 作为示例；后端会在校验和实验性 runtime assembly 时展开 composite，并检测循环引用和最大展开深度。
 
-Workflow schema 目前在后端建模：`internal/agent/node_editor/workflow.go` 定义多 Agent 消息流 DAG、默认 review pipeline、typed message ports、环检测、agent blueprint 引用检查和拓扑执行计划。Workflow JSON 存放在 `.agents/blueprints/workflows/*.json`，示例为 `review-pipeline.json`；后端提供 `/api/workflows` 的 list/get/put/validate 接口，validate 会返回执行顺序、每步输入输出和 agent binding 摘要。Web UI 的 `Workflows` 面板支持新建、复制、选择、编辑、保存和验证 workflow JSON，并在左侧画布预览 DAG、添加 input/agent/output 节点、编辑节点 label 和 agent blueprint、拖动保存节点位置、按 typed message ports 连线和删边。
+Workflow schema 目前在后端建模：`internal/agent/node_editor/workflow.go` 定义多 Agent 消息流 DAG、默认 review pipeline、typed message ports、环检测、agent blueprint 引用检查和拓扑执行计划。Workflow JSON 存放在 `.agents/blueprints/workflows/*.json`，示例为 `review-pipeline.json`；后端提供 `/api/workflows` 的 list/get/put/delete/validate 接口，validate 会返回执行顺序、每步输入输出和 agent binding 摘要。Web UI 的 `Workflows` 面板支持新建、复制、删除、选择、编辑、保存和验证 workflow JSON，并在左侧画布预览 DAG、添加 input/agent/output 节点、编辑节点 label 和 agent blueprint、拖动保存节点位置、按 typed message ports 连线和删边。
 
 实验性 runtime assembly：
 

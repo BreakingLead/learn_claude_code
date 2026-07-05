@@ -1299,6 +1299,35 @@
           }
         };
 
+        const deleteWorkflow = async () => {
+          if (!activeWorkflowId) return;
+          if (!window.confirm(`Delete workflow ${activeWorkflowId}?`)) return;
+          try {
+            const response = await fetch(`/api/workflows/${activeWorkflowId}`, { method: "DELETE" });
+            const result = await response.json();
+            if (!response.ok || !result.ok) {
+              setStatus(`workflow delete failed: ${result.error || response.statusText}`);
+              return;
+            }
+            const remaining = workflows.filter((item) => item.id !== activeWorkflowId);
+            await loadWorkflows();
+            setWorkflowValidationResult(null);
+            setSelectedNodeId("");
+            setSelectedNodeIds([]);
+            if (remaining.length > 0) {
+              await loadWorkflow(remaining[0].id);
+            } else {
+              setActiveWorkflowId("");
+              setWorkflowSource("");
+              setNodes([]);
+              setEdges([]);
+              setStatus("workflow deleted");
+            }
+          } catch (error) {
+            setStatus(`workflow delete failed: ${error.message}`);
+          }
+        };
+
         const save = async () => {
           try {
             const next = parseSource();
@@ -1444,6 +1473,13 @@
                         disabled: !activeWorkflowId,
                         onClick: () => createWorkflow(activeWorkflowId),
                       }, "Duplicate Workflow")
+                    : null,
+                  editorMode === "workflow"
+                    ? React.createElement("button", {
+                        key: "delete-workflow",
+                        disabled: !activeWorkflowId,
+                        onClick: deleteWorkflow,
+                      }, "Delete Workflow")
                     : null,
                   editorMode === "workflow"
                     ? React.createElement("button", {
