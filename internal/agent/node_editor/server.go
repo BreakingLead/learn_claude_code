@@ -350,6 +350,9 @@ func (s *Store) WriteWorkflow(id string, workflow WorkflowDefinition) error {
 	if err := ValidateWorkflow(workflow); err != nil {
 		return err
 	}
+	if err := s.ValidateWorkflowAgentReferences(workflow); err != nil {
+		return err
+	}
 	return WriteWorkflow(path, workflow)
 }
 
@@ -358,7 +361,33 @@ func (s *Store) ValidateWorkflow(workflow WorkflowDefinition) WorkflowValidation
 	if err != nil {
 		return WorkflowValidationResponse{OK: false, Error: err.Error()}
 	}
+	if err := s.ValidateWorkflowAgentReferences(workflow); err != nil {
+		return WorkflowValidationResponse{OK: false, Error: err.Error()}
+	}
 	return WorkflowValidationResponse{OK: true, Order: order}
+}
+
+func (s *Store) ValidateWorkflowAgentReferences(workflow WorkflowDefinition) error {
+	for _, node := range workflow.Nodes {
+		if node.Type != WorkflowNodeTypeAgent {
+			continue
+		}
+		id := safeID(node.AgentBlueprint)
+		if id == "" {
+			return fmt.Errorf("workflow agent node %q requires agent_blueprint", node.ID)
+		}
+		path, err := s.AgentPath(id)
+		if err != nil {
+			return err
+		}
+		if _, err := os.Stat(path); err != nil {
+			if os.IsNotExist(err) {
+				return fmt.Errorf("workflow agent node %q references missing blueprint %q", node.ID, node.AgentBlueprint)
+			}
+			return err
+		}
+	}
+	return nil
 }
 
 func NewServer(workdir string) *Server {

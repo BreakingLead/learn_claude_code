@@ -271,6 +271,9 @@ func TestServerCompositeFromSelectionAPI(t *testing.T) {
 
 func TestServerWorkflowAPI(t *testing.T) {
 	workdir := t.TempDir()
+	if _, err := EnsureDefaultBlueprint(DefaultBlueprintPath(workdir)); err != nil {
+		t.Fatal(err)
+	}
 	store := NewStore(workdir)
 	if err := store.WriteWorkflow("review-pipeline", DefaultWorkflow()); err != nil {
 		t.Fatal(err)
@@ -350,6 +353,37 @@ func TestServerWorkflowAPI(t *testing.T) {
 	}
 	if stored.Name != "Updated Review Pipeline" {
 		t.Fatalf("unexpected stored workflow: %+v", stored)
+	}
+}
+
+func TestServerWorkflowValidationRejectsMissingAgentBlueprint(t *testing.T) {
+	workdir := t.TempDir()
+	if _, err := EnsureDefaultBlueprint(DefaultBlueprintPath(workdir)); err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(NewServer(workdir).Handler())
+	defer server.Close()
+
+	workflow := DefaultWorkflow()
+	workflow.Nodes[1].AgentBlueprint = "missing-agent"
+	raw, err := json.Marshal(workflow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := http.Post(server.URL+"/api/workflows/review-pipeline/validate", "application/json", bytes.NewReader(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var validation WorkflowValidationResponse
+	if err := json.NewDecoder(resp.Body).Decode(&validation); err != nil {
+		t.Fatal(err)
+	}
+	if validation.OK {
+		t.Fatalf("expected missing blueprint validation error, got %+v", validation)
+	}
+	if !strings.Contains(validation.Error, "missing blueprint") {
+		t.Fatalf("unexpected validation error: %+v", validation)
 	}
 }
 
