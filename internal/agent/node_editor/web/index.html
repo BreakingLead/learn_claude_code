@@ -1700,9 +1700,10 @@
           const steps = run.step_count !== undefined ? ` steps=${run.step_count}` : "";
           const failed = run.failed_step_label || run.failed_step_id;
           const failure = failed ? ` failed=${failed}` : "";
+          const rerun = run.rerun_of ? ` rerun=${run.rerun_of}` : "";
           const duration = run.duration_ms !== undefined ? ` ${run.duration_ms}ms` : "";
           const stale = run.stale ? " stale" : "";
-          return `${run.created_at || run.id} [${mode}:${status}]${steps}${failure}${duration}${stale}`;
+          return `${run.created_at || run.id} [${mode}:${status}]${steps}${failure}${rerun}${duration}${stale}`;
         };
 
         const renderWorkflowRunResult = () => {
@@ -1727,6 +1728,9 @@
                 )
               : null,
             React.createElement("div", { className: "muted", key: "mode" }, `mode: ${run.execution_mode || "dry_run"}`),
+            run.rerun_of
+              ? React.createElement("div", { className: "muted", key: "rerun-of" }, `rerun of: ${run.rerun_of}`)
+              : null,
             (run.external_command || []).length > 0
               ? React.createElement("div", { className: "muted", key: "external-command" },
                   `external command: ${(run.external_command || []).join(" ")}`

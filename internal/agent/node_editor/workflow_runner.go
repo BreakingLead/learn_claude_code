@@ -34,6 +34,7 @@ type WorkflowPlanRun struct {
 	ExecutionMode   string                  `json:"execution_mode,omitempty"`
 	ExternalCommand []string                `json:"external_command,omitempty"`
 	TimeoutMS       int                     `json:"timeout_ms,omitempty"`
+	RerunOf         string                  `json:"rerun_of,omitempty"`
 	Status          string                  `json:"status,omitempty"`
 	Error           string                  `json:"error,omitempty"`
 	SourceHash      string                  `json:"source_hash"`

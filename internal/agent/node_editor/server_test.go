@@ -774,6 +774,41 @@ func TestServerRunWorkflowPlanAPI(t *testing.T) {
 	if rerunPayload.Run.Input != payload.Run.Input || rerunPayload.Run.ExecutionMode != payload.Run.ExecutionMode {
 		t.Fatalf("expected rerun to reuse prior config: old=%+v new=%+v", payload.Run, rerunPayload.Run)
 	}
+	if rerunPayload.Run.RerunOf != payload.Run.ID {
+		t.Fatalf("expected rerun lineage: old=%+v new=%+v", payload.Run, rerunPayload.Run)
+	}
+
+	resp, err = http.Get(server.URL + "/api/workflow-runs/review-pipeline/" + rerunPayload.Run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var storedRerun WorkflowPlanRun
+	if err := json.NewDecoder(resp.Body).Decode(&storedRerun); err != nil {
+		t.Fatal(err)
+	}
+	if storedRerun.RerunOf != payload.Run.ID {
+		t.Fatalf("expected stored rerun lineage: %+v", storedRerun)
+	}
+
+	resp, err = http.Get(server.URL + "/api/workflow-runs/review-pipeline")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	listPayload.Runs = nil
+	if err := json.NewDecoder(resp.Body).Decode(&listPayload); err != nil {
+		t.Fatal(err)
+	}
+	var rerunSummary WorkflowRunSummary
+	for _, run := range listPayload.Runs {
+		if run.ID == rerunPayload.Run.ID {
+			rerunSummary = run
+		}
+	}
+	if rerunSummary.RerunOf != payload.Run.ID {
+		t.Fatalf("expected rerun summary lineage: %+v", listPayload.Runs)
+	}
 
 	req, err := http.NewRequest(http.MethodDelete, server.URL+"/api/workflow-runs/review-pipeline/"+payload.Run.ID, nil)
 	if err != nil {

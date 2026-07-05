@@ -67,6 +67,7 @@ type WorkflowRunSummary struct {
 	ExecutionMode   string   `json:"execution_mode,omitempty"`
 	ExternalCommand []string `json:"external_command,omitempty"`
 	TimeoutMS       int      `json:"timeout_ms,omitempty"`
+	RerunOf         string   `json:"rerun_of,omitempty"`
 	Status          string   `json:"status,omitempty"`
 	Error           string   `json:"error,omitempty"`
 	StepCount       int      `json:"step_count"`
@@ -436,6 +437,7 @@ func workflowRunSummary(run WorkflowPlanRun, path string) WorkflowRunSummary {
 		ExecutionMode:   run.ExecutionMode,
 		ExternalCommand: append([]string(nil), run.ExternalCommand...),
 		TimeoutMS:       run.TimeoutMS,
+		RerunOf:         run.RerunOf,
 		Status:          run.Status,
 		Error:           run.Error,
 		StepCount:       len(run.Steps),
@@ -634,12 +636,14 @@ func (s *Store) RerunWorkflowRun(ctx context.Context, workflowID string, runID s
 	if err != nil {
 		return WorkflowPlanRun{}, err
 	}
-	return s.RunWorkflowPlan(ctx, workflowID, WorkflowPlanRunRequest{
+	run, err := s.RunWorkflowPlan(ctx, workflowID, WorkflowPlanRunRequest{
 		Input:           previous.Input,
 		ExecutionMode:   previous.ExecutionMode,
 		ExternalCommand: append([]string(nil), previous.ExternalCommand...),
 		TimeoutMS:       previous.TimeoutMS,
 	})
+	run.RerunOf = previous.ID
+	return run, err
 }
 
 func (s *Store) SaveWorkflowRun(run WorkflowPlanRun) (WorkflowPlanRun, string, error) {
