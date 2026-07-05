@@ -96,6 +96,36 @@ func TestExampleCompositeDefinitionIsValid(t *testing.T) {
 	}
 }
 
+func TestBuildCompositeFromSelectionExposesBoundaryPorts(t *testing.T) {
+	blueprint := DefaultBlueprint()
+	definition, err := BuildCompositeFromSelection(
+		blueprint,
+		[]string{"project-context", "build-mode"},
+		"context-pack",
+		"Context Pack",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(definition.Nodes) != 2 {
+		t.Fatalf("nodes = %d, want 2", len(definition.Nodes))
+	}
+	if len(definition.Edges) != 0 {
+		t.Fatalf("internal edges = %d, want 0", len(definition.Edges))
+	}
+	if len(definition.Inputs) != 0 {
+		t.Fatalf("inputs = %d, want 0", len(definition.Inputs))
+	}
+	if len(definition.Outputs) != 2 {
+		t.Fatalf("outputs = %d, want 2", len(definition.Outputs))
+	}
+	for _, output := range definition.Outputs {
+		if output.Port.Direction != DirectionOutput || output.Port.Type != PortTypePrompt {
+			t.Fatalf("unexpected output mapping: %+v", output)
+		}
+	}
+}
+
 func safeToolsComposite() CompositeDefinition {
 	return CompositeDefinition{
 		Version: SchemaVersion,

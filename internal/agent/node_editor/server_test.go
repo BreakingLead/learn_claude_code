@@ -149,6 +149,48 @@ func TestServerCompositeAPI(t *testing.T) {
 	}
 }
 
+func TestServerCompositeFromSelectionAPI(t *testing.T) {
+	workdir := t.TempDir()
+	server := httptest.NewServer(NewServer(workdir).Handler())
+	defer server.Close()
+
+	request := CompositeFromSelectionRequest{
+		Blueprint: DefaultBlueprint(),
+		NodeIDs:   []string{"core-tools"},
+		ID:        "readonly-pack",
+		Name:      "Readonly Pack",
+	}
+	raw, err := json.Marshal(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := http.Post(server.URL+"/api/composites/from-selection", "application/json", bytes.NewReader(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var payload struct {
+		OK        bool                `json:"ok"`
+		Composite CompositeDefinition `json:"composite"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatal(err)
+	}
+	if !payload.OK || payload.Composite.ID != "readonly-pack" {
+		t.Fatalf("unexpected payload: %+v", payload)
+	}
+	stored, err := NewStore(workdir).LoadComposite("readonly-pack")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stored.Outputs) != 1 || stored.Outputs[0].Port.Type != PortTypeToolset {
+		t.Fatalf("unexpected stored composite: %+v", stored)
+	}
+}
+
 func TestServerPutBlueprintValidatesRouteID(t *testing.T) {
 	workdir := t.TempDir()
 	server := httptest.NewServer(NewServer(workdir).Handler())

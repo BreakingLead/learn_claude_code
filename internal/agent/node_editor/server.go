@@ -35,6 +35,13 @@ type CompositeSummary struct {
 	Path string `json:"path"`
 }
 
+type CompositeFromSelectionRequest struct {
+	Blueprint Blueprint `json:"blueprint"`
+	NodeIDs   []string  `json:"node_ids"`
+	ID        string    `json:"id"`
+	Name      string    `json:"name"`
+}
+
 func NewStore(workdir string) *Store {
 	return &Store{root: filepath.Join(workdir, ".agents", "blueprints")}
 }
@@ -175,6 +182,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/composites", s.handleListComposites)
 	mux.HandleFunc("GET /api/composites/{id}", s.handleGetComposite)
 	mux.HandleFunc("PUT /api/composites/{id}", s.handlePutComposite)
+	mux.HandleFunc("POST /api/composites/from-selection", s.handleCompositeFromSelection)
 	static, _ := fs.Sub(webFS, "web")
 	mux.Handle("GET /", http.FileServer(http.FS(static)))
 	return mux
@@ -280,6 +288,24 @@ func (s *Server) handlePutComposite(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
+func (s *Server) handleCompositeFromSelection(w http.ResponseWriter, r *http.Request) {
+	request, err := decodeCompositeFromSelection(r.Body)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	definition, err := BuildCompositeFromSelection(request.Blueprint, request.NodeIDs, request.ID, request.Name)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	if err := s.store.WriteComposite(definition.ID, definition); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "composite": definition})
+}
+
 func decodeBlueprint(body io.Reader) (Blueprint, error) {
 	defer io.Copy(io.Discard, body)
 	var blueprint Blueprint
@@ -300,6 +326,17 @@ func decodeComposite(body io.Reader) (CompositeDefinition, error) {
 		return CompositeDefinition{}, err
 	}
 	return definition, nil
+}
+
+func decodeCompositeFromSelection(body io.Reader) (CompositeFromSelectionRequest, error) {
+	defer io.Copy(io.Discard, body)
+	var request CompositeFromSelectionRequest
+	decoder := json.NewDecoder(body)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&request); err != nil {
+		return CompositeFromSelectionRequest{}, err
+	}
+	return request, nil
 }
 
 func writeJSON(w http.ResponseWriter, status int, value any) {

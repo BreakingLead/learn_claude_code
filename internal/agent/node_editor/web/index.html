@@ -97,6 +97,11 @@
         background: #2b3240;
       }
 
+      button:disabled {
+        cursor: not-allowed;
+        opacity: 0.45;
+      }
+
       input,
       textarea {
         width: 100%;
@@ -412,6 +417,7 @@
         const [nodes, setNodes, onNodesChange] = useNodesState([]);
         const [edges, setEdges, onEdgesChange] = useEdgesState([]);
         const [selectedNodeId, setSelectedNodeId] = useState("");
+        const [selectedNodeIds, setSelectedNodeIds] = useState([]);
         const selectedNode = (blueprint?.nodes || []).find((node) => node.id === selectedNodeId) || null;
         const [configDraft, setConfigDraft] = useState("");
         const [templates, setTemplates] = useState(fallbackTemplates);
@@ -429,6 +435,7 @@
           if (selectedNodeId && !(next.nodes || []).some((node) => node.id === selectedNodeId)) {
             setSelectedNodeId("");
           }
+          setSelectedNodeIds((ids) => ids.filter((id) => (next.nodes || []).some((node) => node.id === id)));
         }, [selectedNodeId, updateDocument]);
 
         const load = useCallback(async () => {
@@ -437,20 +444,25 @@
           setBlueprintDocument(data, "loaded default blueprint");
         }, [setBlueprintDocument]);
 
+        const loadTemplates = useCallback(async () => {
+          try {
+            const response = await fetch("/api/node-templates");
+            const data = await response.json();
+            if (Array.isArray(data.templates) && data.templates.length > 0) {
+              setTemplates(data.templates);
+            }
+          } catch (error) {
+            setTemplates(fallbackTemplates);
+          }
+        }, []);
+
         useEffect(() => {
           load().catch((error) => setStatus(`load failed: ${error.message}`));
         }, [load]);
 
         useEffect(() => {
-          fetch("/api/node-templates")
-            .then((response) => response.json())
-            .then((data) => {
-              if (Array.isArray(data.templates) && data.templates.length > 0) {
-                setTemplates(data.templates);
-              }
-            })
-            .catch(() => setTemplates(fallbackTemplates));
-        }, []);
+          loadTemplates();
+        }, [loadTemplates]);
 
         useEffect(() => {
           setConfigDraft(selectedNode ? JSON.stringify(selectedNode.config || {}, null, 2) : "");
@@ -522,6 +534,13 @@
 
         const selectNode = useCallback((_, node) => {
           setSelectedNodeId(node.id);
+          setSelectedNodeIds([node.id]);
+        }, []);
+
+        const selectNodes = useCallback(({ nodes: selected }) => {
+          const ids = selected.map((node) => node.id);
+          setSelectedNodeIds(ids);
+          setSelectedNodeId(ids[0] || "");
         }, []);
 
         const updateSelectedNode = useCallback((patch) => {
@@ -570,7 +589,40 @@
           };
           updateDocument(next, "node removed");
           setSelectedNodeId("");
+          setSelectedNodeIds([]);
         }, [blueprint, selectedNode, updateDocument]);
+
+        const createComposite = async () => {
+          try {
+            const next = parseSource();
+            const nodeIDs = selectedNodeIds.length > 0 ? selectedNodeIds : (selectedNodeId ? [selectedNodeId] : []);
+            if (nodeIDs.length === 0) {
+              setStatus("select nodes before creating a composite");
+              return;
+            }
+            const defaultName = nodeIDs.length === 1
+              ? ((next.nodes || []).find((node) => node.id === nodeIDs[0])?.label || "Composite")
+              : "Composite";
+            const name = window.prompt("Composite name", defaultName);
+            if (name === null) return;
+            const id = window.prompt("Composite id", slug(name || defaultName));
+            if (id === null) return;
+            const response = await fetch("/api/composites/from-selection", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ blueprint: next, node_ids: nodeIDs, id, name }),
+            });
+            const result = await response.json();
+            if (!response.ok || !result.ok) {
+              setStatus(`composite failed: ${result.error || response.statusText}`);
+              return;
+            }
+            await loadTemplates();
+            setStatus(`created composite: ${result.composite.id}`);
+          } catch (error) {
+            setStatus(`composite failed: ${error.message}`);
+          }
+        };
 
         const validate = async () => {
           try {
@@ -627,6 +679,11 @@
                 onConnect: connect,
                 onEdgesDelete: deleteEdges,
                 onNodeClick: selectNode,
+                onSelectionChange: selectNodes,
+                onPaneClick: () => {
+                  setSelectedNodeId("");
+                  setSelectedNodeIds([]);
+                },
                 onNodeDragStop: updateNodePosition,
                 isValidConnection: validConnection,
                 fitView: true,
@@ -639,6 +696,11 @@
               React.createElement("div", { className: "panelbar", key: "panelbar" }, [
                 React.createElement("span", { key: "label" }, "Blueprint JSON"),
                 React.createElement("div", { className: "actions", key: "actions" }, [
+                  React.createElement("button", {
+                    key: "composite",
+                    disabled: selectedNodeIds.length === 0 && !selectedNodeId,
+                    onClick: createComposite,
+                  }, "Create Composite"),
                   React.createElement("button", { key: "validate", onClick: validate }, "Validate"),
                   React.createElement("button", { key: "save", onClick: save }, "Save"),
                 ]),

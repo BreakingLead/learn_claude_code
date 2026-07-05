@@ -27,6 +27,104 @@ type CompositeLoader interface {
 	LoadComposite(id string) (CompositeDefinition, error)
 }
 
+func BuildCompositeFromSelection(blueprint Blueprint, selectedIDs []string, id string, name string) (CompositeDefinition, error) {
+	id = safeID(id)
+	if id == "" {
+		return CompositeDefinition{}, fmt.Errorf("composite id is required")
+	}
+	selected := map[string]bool{}
+	for _, nodeID := range selectedIDs {
+		nodeID = strings.TrimSpace(nodeID)
+		if nodeID != "" {
+			selected[nodeID] = true
+		}
+	}
+	if len(selected) == 0 {
+		return CompositeDefinition{}, fmt.Errorf("select at least one node")
+	}
+
+	sourceNodes := map[string]Node{}
+	for _, node := range blueprint.Nodes {
+		sourceNodes[node.ID] = node
+	}
+	var nodes []Node
+	for _, node := range blueprint.Nodes {
+		if selected[node.ID] {
+			nodes = append(nodes, cloneNode(node))
+		}
+	}
+	if len(nodes) != len(selected) {
+		return CompositeDefinition{}, fmt.Errorf("selection contains unknown nodes")
+	}
+	normalizeCompositeNodePositions(nodes)
+
+	var edges []Edge
+	var inputs []CompositePortMapping
+	var outputs []CompositePortMapping
+	usedInputPorts := map[string]bool{}
+	usedOutputPorts := map[string]bool{}
+	for _, edge := range blueprint.Edges {
+		sourceSelected := selected[edge.Source.Node]
+		targetSelected := selected[edge.Target.Node]
+		switch {
+		case sourceSelected && targetSelected:
+			edges = append(edges, edge)
+		case !sourceSelected && targetSelected:
+			_, innerPort, err := findPort(sourceNodes, edge.Target, DirectionInput)
+			if err != nil {
+				return CompositeDefinition{}, err
+			}
+			portID := uniqueCompositePortID("in_"+edge.Target.Node+"_"+edge.Target.Port, usedInputPorts)
+			inputs = append(inputs, CompositePortMapping{
+				Port: Port{
+					ID:        portID,
+					Type:      innerPort.Type,
+					Label:     compositePortLabel(sourceNodes[edge.Target.Node], innerPort),
+					Direction: DirectionInput,
+					Multiple:  innerPort.Multiple,
+					Order:     innerPort.Order,
+				},
+				Endpoint: edge.Target,
+			})
+		case sourceSelected && !targetSelected:
+			_, innerPort, err := findPort(sourceNodes, edge.Source, DirectionOutput)
+			if err != nil {
+				return CompositeDefinition{}, err
+			}
+			portID := uniqueCompositePortID("out_"+edge.Source.Node+"_"+edge.Source.Port, usedOutputPorts)
+			outputs = append(outputs, CompositePortMapping{
+				Port: Port{
+					ID:        portID,
+					Type:      innerPort.Type,
+					Label:     compositePortLabel(sourceNodes[edge.Source.Node], innerPort),
+					Direction: DirectionOutput,
+					Order:     innerPort.Order,
+				},
+				Endpoint: edge.Source,
+			})
+		}
+	}
+	if strings.TrimSpace(name) == "" {
+		name = id
+	}
+	definition := CompositeDefinition{
+		Version: SchemaVersion,
+		ID:      id,
+		Name:    name,
+		Inputs:  inputs,
+		Outputs: outputs,
+		Nodes:   nodes,
+		Edges:   edges,
+		Metadata: map[string]any{
+			"created_from": blueprint.ID,
+		},
+	}
+	if err := ValidateComposite(definition); err != nil {
+		return CompositeDefinition{}, err
+	}
+	return definition, nil
+}
+
 func ExpandComposites(blueprint Blueprint, loader CompositeLoader) (Blueprint, error) {
 	return expandComposites(blueprint, loader, nil, 0)
 }
@@ -235,4 +333,62 @@ func configString(config map[string]any, key string) string {
 	}
 	text, _ := value.(string)
 	return text
+}
+
+func cloneNode(node Node) Node {
+	next := node
+	next.Inputs = append([]Port(nil), node.Inputs...)
+	next.Outputs = append([]Port(nil), node.Outputs...)
+	if node.Config != nil {
+		next.Config = map[string]any{}
+		for key, value := range node.Config {
+			next.Config[key] = value
+		}
+	}
+	return next
+}
+
+func normalizeCompositeNodePositions(nodes []Node) {
+	if len(nodes) == 0 {
+		return
+	}
+	minX := nodes[0].Position.X
+	minY := nodes[0].Position.Y
+	for _, node := range nodes[1:] {
+		if node.Position.X < minX {
+			minX = node.Position.X
+		}
+		if node.Position.Y < minY {
+			minY = node.Position.Y
+		}
+	}
+	for index := range nodes {
+		nodes[index].Position.X = nodes[index].Position.X - minX + 80
+		nodes[index].Position.Y = nodes[index].Position.Y - minY + 80
+	}
+}
+
+func uniqueCompositePortID(raw string, used map[string]bool) string {
+	base := safeID(raw)
+	if base == "" {
+		base = "port"
+	}
+	id := base
+	for suffix := 2; used[id]; suffix++ {
+		id = fmt.Sprintf("%s_%d", base, suffix)
+	}
+	used[id] = true
+	return id
+}
+
+func compositePortLabel(node Node, port Port) string {
+	nodeLabel := strings.TrimSpace(node.Label)
+	if nodeLabel == "" {
+		nodeLabel = node.ID
+	}
+	portLabel := strings.TrimSpace(port.Label)
+	if portLabel == "" {
+		portLabel = port.ID
+	}
+	return nodeLabel + " / " + portLabel
 }
