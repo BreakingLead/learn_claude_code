@@ -599,6 +599,8 @@
         const [workflows, setWorkflows] = useState([]);
         const [activeWorkflowId, setActiveWorkflowId] = useState("");
         const [workflowSource, setWorkflowSource] = useState("");
+        const [workflowPlans, setWorkflowPlans] = useState([]);
+        const [activeWorkflowPlanId, setActiveWorkflowPlanId] = useState("");
         const [editorMode, setEditorMode] = useState("blueprint");
         const [validationResult, setValidationResult] = useState(null);
         const [workflowValidationResult, setWorkflowValidationResult] = useState(null);
@@ -682,6 +684,15 @@
           setWorkflows(Array.isArray(data.workflows) ? data.workflows : []);
         }, []);
 
+        const loadWorkflowPlans = useCallback(async () => {
+          const response = await fetch("/api/workflow-plans");
+          const data = await response.json();
+          if (!response.ok) throw new Error(data.error || response.statusText);
+          const plans = Array.isArray(data.plans) ? data.plans : [];
+          setWorkflowPlans(plans);
+          setActiveWorkflowPlanId((id) => id && plans.some((plan) => plan.id === id) ? id : plans[0]?.id || "");
+        }, []);
+
         const loadWorkflow = useCallback(async (id) => {
           const response = await fetch(`/api/workflows/${id}`);
           const data = await response.json();
@@ -691,6 +702,16 @@
           setEditorMode("workflow");
           setStatus(`loaded workflow ${data.id}`);
         }, [updateWorkflowDocument]);
+
+        const loadWorkflowPlan = useCallback(async (id) => {
+          const response = await fetch(`/api/workflow-plans/${id}`);
+          const data = await response.json();
+          if (!response.ok) throw new Error(data.error || response.statusText);
+          setActiveWorkflowPlanId(data.workflow_id);
+          setWorkflowCompileResult({ ok: true, plan: data });
+          setCompiledPlanPath((workflowPlans.find((plan) => plan.id === data.workflow_id) || {}).path || "");
+          setStatus(`loaded compiled plan ${data.workflow_id}`);
+        }, [workflowPlans]);
 
         const loadTemplates = useCallback(async () => {
           try {
@@ -708,8 +729,9 @@
           loadBlueprints().catch((error) => setStatus(`list failed: ${error.message}`));
           loadComposites().catch((error) => setStatus(`composite list failed: ${error.message}`));
           loadWorkflows().catch((error) => setStatus(`workflow list failed: ${error.message}`));
+          loadWorkflowPlans().catch((error) => setStatus(`workflow plan list failed: ${error.message}`));
           loadBlueprint("default").catch((error) => setStatus(`load failed: ${error.message}`));
-        }, [loadBlueprint, loadBlueprints, loadComposites, loadWorkflows]);
+        }, [loadBlueprint, loadBlueprints, loadComposites, loadWorkflowPlans, loadWorkflows]);
 
         useEffect(() => {
           loadTemplates();
@@ -1310,6 +1332,8 @@
               return;
             }
             setCompiledPlanPath(result.path || "");
+            setActiveWorkflowPlanId(result.plan?.workflow_id || next.id);
+            await loadWorkflowPlans();
             setStatus(`compiled plan saved: ${result.path || "(unknown path)"}`);
           } catch (error) {
             setStatus(`compiled plan save failed: ${error.message}`);
@@ -1667,6 +1691,22 @@
                       }, workflows.map((item) =>
                         React.createElement("option", { key: item.id, value: item.id }, item.name ? `${item.name} (${item.id})` : item.id)
                       ))
+                    : null,
+                  editorMode === "workflow" && workflowPlans.length > 0
+                    ? React.createElement("select", {
+                        key: "workflow-plan-select",
+                        value: activeWorkflowPlanId,
+                        onChange: (event) => setActiveWorkflowPlanId(event.target.value),
+                      }, workflowPlans.map((item) =>
+                        React.createElement("option", { key: item.id, value: item.id }, item.name ? `${item.name} plan (${item.id})` : item.id)
+                      ))
+                    : null,
+                  editorMode === "workflow"
+                    ? React.createElement("button", {
+                        key: "load-workflow-plan",
+                        disabled: !activeWorkflowPlanId,
+                        onClick: () => loadWorkflowPlan(activeWorkflowPlanId).catch((error) => setStatus(`workflow plan load failed: ${error.message}`)),
+                      }, "Load Plan")
                     : null,
                   editorMode === "blueprint"
                     ? React.createElement("button", {

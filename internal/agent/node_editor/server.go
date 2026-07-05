@@ -42,6 +42,12 @@ type WorkflowSummary struct {
 	Path string `json:"path"`
 }
 
+type WorkflowPlanSummary struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	Path string `json:"path"`
+}
+
 type CreateBlueprintRequest struct {
 	ID       string `json:"id"`
 	Name     string `json:"name"`
@@ -296,6 +302,36 @@ func (s *Store) ListWorkflows() ([]WorkflowSummary, error) {
 	return summaries, nil
 }
 
+func (s *Store) ListWorkflowPlans() ([]WorkflowPlanSummary, error) {
+	entries, err := os.ReadDir(s.WorkflowPlanDir())
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var summaries []WorkflowPlanSummary
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
+			continue
+		}
+		path := filepath.Join(s.WorkflowPlanDir(), entry.Name())
+		plan, err := ReadCompiledWorkflowPlan(path)
+		if err != nil {
+			continue
+		}
+		summaries = append(summaries, WorkflowPlanSummary{
+			ID:   plan.WorkflowID,
+			Name: plan.Name,
+			Path: path,
+		})
+	}
+	sort.Slice(summaries, func(i, j int) bool {
+		return summaries[i].ID < summaries[j].ID
+	})
+	return summaries, nil
+}
+
 func (s *Store) ReadAgent(id string) (Blueprint, error) {
 	path, err := s.AgentPath(id)
 	if err != nil {
@@ -425,6 +461,14 @@ func (s *Store) ReadWorkflow(id string) (WorkflowDefinition, error) {
 		return WorkflowDefinition{}, err
 	}
 	return ReadWorkflow(path)
+}
+
+func (s *Store) ReadWorkflowPlan(id string) (WorkflowCompiledPlan, error) {
+	path, err := s.WorkflowPlanPath(id)
+	if err != nil {
+		return WorkflowCompiledPlan{}, err
+	}
+	return ReadCompiledWorkflowPlan(path)
 }
 
 func (s *Store) DeleteWorkflow(id string) error {
@@ -688,6 +732,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/workflows/{id}/simulate", s.handleSimulateWorkflow)
 	mux.HandleFunc("POST /api/workflows/{id}/compile", s.handleCompileWorkflow)
 	mux.HandleFunc("POST /api/workflows/{id}/compiled-plan", s.handleSaveCompiledWorkflowPlan)
+	mux.HandleFunc("GET /api/workflow-plans", s.handleListWorkflowPlans)
+	mux.HandleFunc("GET /api/workflow-plans/{id}", s.handleGetWorkflowPlan)
 	static, _ := fs.Sub(webFS, "web")
 	mux.Handle("GET /", http.FileServer(http.FS(static)))
 	return mux
@@ -818,6 +864,24 @@ func (s *Server) handleListWorkflows(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"workflows": summaries})
+}
+
+func (s *Server) handleListWorkflowPlans(w http.ResponseWriter, r *http.Request) {
+	summaries, err := s.store.ListWorkflowPlans()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"plans": summaries})
+}
+
+func (s *Server) handleGetWorkflowPlan(w http.ResponseWriter, r *http.Request) {
+	plan, err := s.store.ReadWorkflowPlan(r.PathValue("id"))
+	if err != nil {
+		writeError(w, http.StatusNotFound, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, plan)
 }
 
 func (s *Server) handleCreateWorkflow(w http.ResponseWriter, r *http.Request) {
@@ -1054,4 +1118,16 @@ func writeCompiledWorkflowPlan(path string, plan WorkflowCompiledPlan) error {
 	}
 	raw = append(raw, '\n')
 	return os.WriteFile(path, raw, 0o644)
+}
+
+func ReadCompiledWorkflowPlan(path string) (WorkflowCompiledPlan, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return WorkflowCompiledPlan{}, err
+	}
+	var plan WorkflowCompiledPlan
+	if err := json.Unmarshal(raw, &plan); err != nil {
+		return WorkflowCompiledPlan{}, err
+	}
+	return plan, nil
 }

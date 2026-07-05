@@ -522,6 +522,50 @@ func TestServerSaveCompiledWorkflowPlanAPI(t *testing.T) {
 	}
 }
 
+func TestServerWorkflowPlanListAndGetAPI(t *testing.T) {
+	workdir := t.TempDir()
+	if _, err := EnsureDefaultBlueprint(DefaultBlueprintPath(workdir)); err != nil {
+		t.Fatal(err)
+	}
+	store := NewStore(workdir)
+	if _, _, err := store.SaveCompiledWorkflowPlan(DefaultWorkflow()); err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(NewServer(workdir).Handler())
+	defer server.Close()
+
+	resp, err := http.Get(server.URL + "/api/workflow-plans")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("list workflow plans status = %d", resp.StatusCode)
+	}
+	var list struct {
+		Plans []WorkflowPlanSummary `json:"plans"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&list); err != nil {
+		t.Fatal(err)
+	}
+	if len(list.Plans) != 1 || list.Plans[0].ID != "review-pipeline" {
+		t.Fatalf("unexpected workflow plan list: %+v", list)
+	}
+
+	resp, err = http.Get(server.URL + "/api/workflow-plans/review-pipeline")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var plan WorkflowCompiledPlan
+	if err := json.NewDecoder(resp.Body).Decode(&plan); err != nil {
+		t.Fatal(err)
+	}
+	if plan.WorkflowID != "review-pipeline" || len(plan.AgentRuns) != 3 {
+		t.Fatalf("unexpected workflow plan: %+v", plan)
+	}
+}
+
 func TestServerCreateWorkflowAPI(t *testing.T) {
 	workdir := t.TempDir()
 	if _, err := EnsureDefaultBlueprint(DefaultBlueprintPath(workdir)); err != nil {
