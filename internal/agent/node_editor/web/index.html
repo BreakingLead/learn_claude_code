@@ -584,6 +584,15 @@
         const [workflowSource, setWorkflowSource] = useState("");
         const [editorMode, setEditorMode] = useState("blueprint");
         const [validationResult, setValidationResult] = useState(null);
+        const selectedWorkflowNode = (() => {
+          if (editorMode !== "workflow" || !selectedNodeId || !workflowSource.trim()) return null;
+          try {
+            const workflow = JSON.parse(workflowSource);
+            return (workflow.nodes || []).find((node) => node.id === selectedNodeId) || null;
+          } catch {
+            return null;
+          }
+        })();
 
         const updateDocument = useCallback((next, message) => {
           setBlueprint(next);
@@ -868,10 +877,45 @@
               ...workflow,
               nodes: [...(workflow.nodes || []), node],
             }, `added ${node.label}`);
+            setSelectedNodeId(node.id);
+            setSelectedNodeIds([node.id]);
           } catch (error) {
             setStatus(`workflow node failed: ${error.message}`);
           }
         }, [activeBlueprintId, updateWorkflowDocument, workflowSource]);
+
+        const updateSelectedWorkflowNode = useCallback((patch) => {
+          if (!selectedWorkflowNode) return;
+          try {
+            const workflow = JSON.parse(workflowSource);
+            updateWorkflowDocument({
+              ...workflow,
+              nodes: (workflow.nodes || []).map((node) =>
+                node.id === selectedWorkflowNode.id ? { ...node, ...patch } : node
+              ),
+            }, "workflow node updated");
+          } catch (error) {
+            setStatus(`workflow node update failed: ${error.message}`);
+          }
+        }, [selectedWorkflowNode, updateWorkflowDocument, workflowSource]);
+
+        const deleteSelectedWorkflowNode = useCallback(() => {
+          if (!selectedWorkflowNode) return;
+          try {
+            const workflow = JSON.parse(workflowSource);
+            updateWorkflowDocument({
+              ...workflow,
+              nodes: (workflow.nodes || []).filter((node) => node.id !== selectedWorkflowNode.id),
+              edges: (workflow.edges || []).filter((edge) =>
+                edge.source.node !== selectedWorkflowNode.id && edge.target.node !== selectedWorkflowNode.id
+              ),
+            }, "workflow node removed");
+            setSelectedNodeId("");
+            setSelectedNodeIds([]);
+          } catch (error) {
+            setStatus(`workflow node remove failed: ${error.message}`);
+          }
+        }, [selectedWorkflowNode, updateWorkflowDocument, workflowSource]);
 
         const deleteSelectedNode = useCallback(() => {
           if (!blueprint || !selectedNode || selectedNode.id === blueprint.root_agent) return;
@@ -1465,11 +1509,43 @@
                 : [React.createElement("div", { className: "muted", key: "empty-selection" }, "Select a node to edit its label and config.")])
                   ])
                 : editorMode === "workflow"
-                ? React.createElement("div", { className: "inspector", key: "workflow-inspector" },
-                    React.createElement("div", { className: "muted" }, activeWorkflowId
+                ? React.createElement("div", { className: "inspector", key: "workflow-inspector" }, [
+                    React.createElement("div", { className: "muted", key: "help" }, activeWorkflowId
                       ? "Edit the multi-agent workflow DAG JSON. Validation checks typed message ports and cycle-free execution order."
-                      : "No workflow selected.")
-                  )
+                      : "No workflow selected."),
+                    ...(selectedWorkflowNode
+                      ? [
+                          React.createElement("div", { className: "field", key: "workflow-node-id" }, [
+                            React.createElement("label", { key: "label" }, "Workflow Node"),
+                            React.createElement("input", { key: "input", value: selectedWorkflowNode.id, readOnly: true }),
+                          ]),
+                          React.createElement("div", { className: "field", key: "workflow-node-label" }, [
+                            React.createElement("label", { key: "label" }, "Label"),
+                            React.createElement("input", {
+                              key: "input",
+                              value: selectedWorkflowNode.label || "",
+                              onChange: (event) => updateSelectedWorkflowNode({ label: event.target.value }),
+                            }),
+                          ]),
+                          selectedWorkflowNode.type === "workflow_agent"
+                            ? React.createElement("div", { className: "field", key: "workflow-agent-blueprint" }, [
+                                React.createElement("label", { key: "label" }, "Agent Blueprint"),
+                                React.createElement("select", {
+                                  key: "select",
+                                  value: selectedWorkflowNode.agent_blueprint || "default",
+                                  onChange: (event) => updateSelectedWorkflowNode({ agent_blueprint: event.target.value }),
+                                }, blueprints.map((item) =>
+                                  React.createElement("option", { key: item.id, value: item.id }, item.name ? `${item.name} (${item.id})` : item.id)
+                                )),
+                              ])
+                            : null,
+                          React.createElement("button", {
+                            key: "delete-workflow-node",
+                            onClick: deleteSelectedWorkflowNode,
+                          }, "Delete Workflow Node"),
+                        ]
+                      : [React.createElement("div", { className: "muted", key: "empty-workflow-selection" }, "Select a workflow node to edit it.")]),
+                  ])
                 : React.createElement("div", { className: "inspector", key: "composite-inspector" },
                     React.createElement("div", { className: "muted" }, activeCompositeId
                       ? "Edit the reusable composite definition directly. Saving refreshes node templates."
