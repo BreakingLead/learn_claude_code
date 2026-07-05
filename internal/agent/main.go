@@ -52,6 +52,10 @@ func runNodeEditor() {
 		fmt.Println(colorRed("Blueprint error: " + err.Error()))
 		return
 	}
+	if _, err := nodeeditor.EnsureDefaultWorkflow(nodeeditor.DefaultWorkflowPath(config.Workdir)); err != nil {
+		fmt.Println(colorRed("Workflow error: " + err.Error()))
+		return
+	}
 	addr := getEnvOr("BEE_AGENT_NODE_EDITOR_ADDR", "127.0.0.1:8787")
 	fmt.Printf("Bee Agent Builder: http://%s\n", addr)
 	if err := http.ListenAndServe(addr, nodeeditor.NewServer(config.Workdir).Handler()); err != nil {

@@ -1,6 +1,8 @@
 package nodeeditor
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -26,6 +28,68 @@ func TestDefaultWorkflowValidatesAndOrders(t *testing.T) {
 		indexOf(order, "reviewer") > indexOf(order, "summary") ||
 		indexOf(order, "summary") > indexOf(order, "output") {
 		t.Fatalf("unexpected execution order: %v", order)
+	}
+}
+
+func TestEnsureDefaultWorkflowWritesOnce(t *testing.T) {
+	path := filepath.Join(t.TempDir(), ".agents", "blueprints", "workflows", "review-pipeline.json")
+	created, err := EnsureDefaultWorkflow(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !created {
+		t.Fatal("expected default workflow to be created")
+	}
+	workflow, err := ReadWorkflow(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if workflow.ID != "review-pipeline" {
+		t.Fatalf("unexpected workflow: %+v", workflow)
+	}
+
+	custom := []byte(`{"version":1,"id":"custom","name":"Custom","nodes":[{"id":"out","type":"workflow_output","label":"Out","position":{"x":0,"y":0},"inputs":[{"id":"message","type":"message","label":"Message","direction":"input"}]}],"edges":[]}`)
+	if err := os.WriteFile(path, custom, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	created, err = EnsureDefaultWorkflow(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created {
+		t.Fatal("expected existing workflow to be preserved")
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(custom) {
+		t.Fatalf("expected custom workflow to remain, got %s", string(got))
+	}
+}
+
+func TestExampleWorkflowsValidateAndOrder(t *testing.T) {
+	paths, err := filepath.Glob(filepath.Join("..", "..", "..", ".agents", "blueprints", "workflows", "*.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(paths) == 0 {
+		t.Fatal("expected example workflows")
+	}
+	for _, path := range paths {
+		t.Run(filepath.Base(path), func(t *testing.T) {
+			workflow, err := ReadWorkflow(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			order, err := WorkflowExecutionOrder(workflow)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(order) != len(workflow.Nodes) {
+				t.Fatalf("unexpected order for %s: %+v", path, order)
+			}
+		})
 	}
 }
 

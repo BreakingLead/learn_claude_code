@@ -1,0 +1,180 @@
+{
+  "version": 1,
+  "id": "review-pipeline",
+  "name": "Review Pipeline",
+  "nodes": [
+    {
+      "id": "prompt",
+      "type": "workflow_input",
+      "label": "Prompt",
+      "position": {
+        "x": 80,
+        "y": 180
+      },
+      "outputs": [
+        {
+          "id": "message",
+          "type": "message",
+          "label": "Message",
+          "direction": "output"
+        }
+      ]
+    },
+    {
+      "id": "developer",
+      "type": "workflow_agent",
+      "label": "Developer Agent",
+      "agent_blueprint": "default",
+      "position": {
+        "x": 340,
+        "y": 80
+      },
+      "inputs": [
+        {
+          "id": "input",
+          "type": "message",
+          "label": "Input",
+          "direction": "input"
+        }
+      ],
+      "outputs": [
+        {
+          "id": "output",
+          "type": "message",
+          "label": "Output",
+          "direction": "output"
+        }
+      ]
+    },
+    {
+      "id": "reviewer",
+      "type": "workflow_agent",
+      "label": "Reviewer Agent",
+      "agent_blueprint": "default",
+      "position": {
+        "x": 340,
+        "y": 280
+      },
+      "inputs": [
+        {
+          "id": "input",
+          "type": "message",
+          "label": "Input",
+          "direction": "input"
+        }
+      ],
+      "outputs": [
+        {
+          "id": "output",
+          "type": "message",
+          "label": "Output",
+          "direction": "output"
+        }
+      ]
+    },
+    {
+      "id": "summary",
+      "type": "workflow_agent",
+      "label": "Summary Agent",
+      "agent_blueprint": "default",
+      "position": {
+        "x": 620,
+        "y": 180
+      },
+      "inputs": [
+        {
+          "id": "input",
+          "type": "message",
+          "label": "Inputs",
+          "direction": "input",
+          "multiple": true
+        }
+      ],
+      "outputs": [
+        {
+          "id": "output",
+          "type": "message",
+          "label": "Output",
+          "direction": "output"
+        }
+      ]
+    },
+    {
+      "id": "output",
+      "type": "workflow_output",
+      "label": "Output",
+      "position": {
+        "x": 880,
+        "y": 180
+      },
+      "inputs": [
+        {
+          "id": "message",
+          "type": "message",
+          "label": "Message",
+          "direction": "input"
+        }
+      ]
+    }
+  ],
+  "edges": [
+    {
+      "id": "edge-prompt-developer",
+      "source": {
+        "node": "prompt",
+        "port": "message"
+      },
+      "target": {
+        "node": "developer",
+        "port": "input"
+      }
+    },
+    {
+      "id": "edge-prompt-reviewer",
+      "source": {
+        "node": "prompt",
+        "port": "message"
+      },
+      "target": {
+        "node": "reviewer",
+        "port": "input"
+      }
+    },
+    {
+      "id": "edge-developer-summary",
+      "source": {
+        "node": "developer",
+        "port": "output"
+      },
+      "target": {
+        "node": "summary",
+        "port": "input"
+      }
+    },
+    {
+      "id": "edge-reviewer-summary",
+      "source": {
+        "node": "reviewer",
+        "port": "output"
+      },
+      "target": {
+        "node": "summary",
+        "port": "input"
+      }
+    },
+    {
+      "id": "edge-summary-output",
+      "source": {
+        "node": "summary",
+        "port": "output"
+      },
+      "target": {
+        "node": "output",
+        "port": "message"
+      }
+    }
+  ],
+  "metadata": {
+    "purpose": "default multi-agent workflow"
+  }
+}

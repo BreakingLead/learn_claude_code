@@ -3,6 +3,8 @@ package nodeeditor
 import (
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 )
@@ -93,6 +95,50 @@ func DefaultWorkflow() WorkflowDefinition {
 			"purpose": "default multi-agent workflow",
 		},
 	}
+}
+
+func DefaultWorkflowPath(workdir string) string {
+	return filepath.Join(workdir, ".agents", "blueprints", "workflows", "review-pipeline.json")
+}
+
+func EnsureDefaultWorkflow(path string) (bool, error) {
+	if strings.TrimSpace(path) == "" {
+		return false, fmt.Errorf("default workflow path is required")
+	}
+	if _, err := os.Stat(path); err == nil {
+		return false, nil
+	} else if !os.IsNotExist(err) {
+		return false, err
+	}
+	workflow := DefaultWorkflow()
+	if err := ValidateWorkflow(workflow); err != nil {
+		return false, err
+	}
+	return true, WriteWorkflow(path, workflow)
+}
+
+func ReadWorkflow(path string) (WorkflowDefinition, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return WorkflowDefinition{}, err
+	}
+	var workflow WorkflowDefinition
+	if err := json.Unmarshal(raw, &workflow); err != nil {
+		return WorkflowDefinition{}, err
+	}
+	return workflow, nil
+}
+
+func WriteWorkflow(path string, workflow WorkflowDefinition) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	raw, err := json.MarshalIndent(workflow, "", "  ")
+	if err != nil {
+		return err
+	}
+	raw = append(raw, '\n')
+	return os.WriteFile(path, raw, 0o644)
 }
 
 func ValidateWorkflow(workflow WorkflowDefinition) error {

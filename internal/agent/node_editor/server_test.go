@@ -269,6 +269,116 @@ func TestServerCompositeFromSelectionAPI(t *testing.T) {
 	}
 }
 
+func TestServerWorkflowAPI(t *testing.T) {
+	workdir := t.TempDir()
+	store := NewStore(workdir)
+	if err := store.WriteWorkflow("review-pipeline", DefaultWorkflow()); err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(NewServer(workdir).Handler())
+	defer server.Close()
+
+	resp, err := http.Get(server.URL + "/api/workflows")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("list workflow status = %d", resp.StatusCode)
+	}
+	var list struct {
+		Workflows []WorkflowSummary `json:"workflows"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&list); err != nil {
+		t.Fatal(err)
+	}
+	if len(list.Workflows) != 1 || list.Workflows[0].ID != "review-pipeline" {
+		t.Fatalf("unexpected workflow list: %+v", list)
+	}
+
+	resp, err = http.Get(server.URL + "/api/workflows/review-pipeline")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var workflow WorkflowDefinition
+	if err := json.NewDecoder(resp.Body).Decode(&workflow); err != nil {
+		t.Fatal(err)
+	}
+	if workflow.ID != "review-pipeline" {
+		t.Fatalf("unexpected workflow: %+v", workflow)
+	}
+
+	raw, err := json.Marshal(workflow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err = http.Post(server.URL+"/api/workflows/review-pipeline/validate", "application/json", bytes.NewReader(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var validation WorkflowValidationResponse
+	if err := json.NewDecoder(resp.Body).Decode(&validation); err != nil {
+		t.Fatal(err)
+	}
+	if !validation.OK || len(validation.Order) != len(workflow.Nodes) {
+		t.Fatalf("unexpected workflow validation: %+v", validation)
+	}
+
+	workflow.Name = "Updated Review Pipeline"
+	raw, err = json.Marshal(workflow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req, err := http.NewRequest(http.MethodPut, server.URL+"/api/workflows/review-pipeline", bytes.NewReader(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("put workflow status = %d", resp.StatusCode)
+	}
+	stored, err := store.ReadWorkflow("review-pipeline")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Name != "Updated Review Pipeline" {
+		t.Fatalf("unexpected stored workflow: %+v", stored)
+	}
+}
+
+func TestServerPutWorkflowValidatesRouteID(t *testing.T) {
+	workdir := t.TempDir()
+	server := httptest.NewServer(NewServer(workdir).Handler())
+	defer server.Close()
+
+	workflow := DefaultWorkflow()
+	workflow.ID = "other"
+	raw, err := json.Marshal(workflow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req, err := http.NewRequest(http.MethodPut, server.URL+"/api/workflows/review-pipeline", bytes.NewReader(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+}
+
 func TestServerPutBlueprintValidatesRouteID(t *testing.T) {
 	workdir := t.TempDir()
 	server := httptest.NewServer(NewServer(workdir).Handler())

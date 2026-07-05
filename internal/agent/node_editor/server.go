@@ -36,6 +36,12 @@ type CompositeSummary struct {
 	Path string `json:"path"`
 }
 
+type WorkflowSummary struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	Path string `json:"path"`
+}
+
 type CreateBlueprintRequest struct {
 	ID       string `json:"id"`
 	Name     string `json:"name"`
@@ -66,6 +72,12 @@ type BlueprintValidationResponse struct {
 	Runtime      BlueprintRuntimeSelector `json:"runtime,omitempty"`
 }
 
+type WorkflowValidationResponse struct {
+	OK    bool     `json:"ok"`
+	Error string   `json:"error,omitempty"`
+	Order []string `json:"order,omitempty"`
+}
+
 func NewStore(workdir string) *Store {
 	return &Store{root: filepath.Join(workdir, ".agents", "blueprints")}
 }
@@ -76,6 +88,10 @@ func (s *Store) AgentDir() string {
 
 func (s *Store) CompositeDir() string {
 	return filepath.Join(s.root, "composites")
+}
+
+func (s *Store) WorkflowDir() string {
+	return filepath.Join(s.root, "workflows")
 }
 
 func (s *Store) AgentPath(id string) (string, error) {
@@ -92,6 +108,14 @@ func (s *Store) CompositePath(id string) (string, error) {
 		return "", fmt.Errorf("composite id is required")
 	}
 	return filepath.Join(s.CompositeDir(), id+".json"), nil
+}
+
+func (s *Store) WorkflowPath(id string) (string, error) {
+	id = safeID(id)
+	if id == "" {
+		return "", fmt.Errorf("workflow id is required")
+	}
+	return filepath.Join(s.WorkflowDir(), id+".json"), nil
 }
 
 func (s *Store) ListAgents() ([]BlueprintSummary, error) {
@@ -145,6 +169,36 @@ func (s *Store) ListComposites() ([]CompositeSummary, error) {
 		summaries = append(summaries, CompositeSummary{
 			ID:   definition.ID,
 			Name: definition.Name,
+			Path: path,
+		})
+	}
+	sort.Slice(summaries, func(i, j int) bool {
+		return summaries[i].ID < summaries[j].ID
+	})
+	return summaries, nil
+}
+
+func (s *Store) ListWorkflows() ([]WorkflowSummary, error) {
+	entries, err := os.ReadDir(s.WorkflowDir())
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var summaries []WorkflowSummary
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
+			continue
+		}
+		path := filepath.Join(s.WorkflowDir(), entry.Name())
+		workflow, err := ReadWorkflow(path)
+		if err != nil {
+			continue
+		}
+		summaries = append(summaries, WorkflowSummary{
+			ID:   workflow.ID,
+			Name: workflow.Name,
 			Path: path,
 		})
 	}
@@ -277,6 +331,36 @@ func (s *Store) WriteComposite(id string, definition CompositeDefinition) error 
 	return WriteComposite(path, definition)
 }
 
+func (s *Store) ReadWorkflow(id string) (WorkflowDefinition, error) {
+	path, err := s.WorkflowPath(id)
+	if err != nil {
+		return WorkflowDefinition{}, err
+	}
+	return ReadWorkflow(path)
+}
+
+func (s *Store) WriteWorkflow(id string, workflow WorkflowDefinition) error {
+	path, err := s.WorkflowPath(id)
+	if err != nil {
+		return err
+	}
+	if safeID(workflow.ID) != safeID(id) {
+		return fmt.Errorf("workflow id %q does not match route id %q", workflow.ID, id)
+	}
+	if err := ValidateWorkflow(workflow); err != nil {
+		return err
+	}
+	return WriteWorkflow(path, workflow)
+}
+
+func (s *Store) ValidateWorkflow(workflow WorkflowDefinition) WorkflowValidationResponse {
+	order, err := WorkflowExecutionOrder(workflow)
+	if err != nil {
+		return WorkflowValidationResponse{OK: false, Error: err.Error()}
+	}
+	return WorkflowValidationResponse{OK: true, Order: order}
+}
+
 func NewServer(workdir string) *Server {
 	return &Server{store: NewStore(workdir)}
 }
@@ -293,6 +377,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/composites/{id}", s.handleGetComposite)
 	mux.HandleFunc("PUT /api/composites/{id}", s.handlePutComposite)
 	mux.HandleFunc("POST /api/composites/from-selection", s.handleCompositeFromSelection)
+	mux.HandleFunc("GET /api/workflows", s.handleListWorkflows)
+	mux.HandleFunc("GET /api/workflows/{id}", s.handleGetWorkflow)
+	mux.HandleFunc("PUT /api/workflows/{id}", s.handlePutWorkflow)
+	mux.HandleFunc("POST /api/workflows/{id}/validate", s.handleValidateWorkflow)
 	static, _ := fs.Sub(webFS, "web")
 	mux.Handle("GET /", http.FileServer(http.FS(static)))
 	return mux
@@ -416,6 +504,46 @@ func (s *Server) handleCompositeFromSelection(w http.ResponseWriter, r *http.Req
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "composite": definition})
 }
 
+func (s *Server) handleListWorkflows(w http.ResponseWriter, r *http.Request) {
+	summaries, err := s.store.ListWorkflows()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"workflows": summaries})
+}
+
+func (s *Server) handleGetWorkflow(w http.ResponseWriter, r *http.Request) {
+	workflow, err := s.store.ReadWorkflow(r.PathValue("id"))
+	if err != nil {
+		writeError(w, http.StatusNotFound, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, workflow)
+}
+
+func (s *Server) handlePutWorkflow(w http.ResponseWriter, r *http.Request) {
+	workflow, err := decodeWorkflow(r.Body)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	if err := s.store.WriteWorkflow(r.PathValue("id"), workflow); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func (s *Server) handleValidateWorkflow(w http.ResponseWriter, r *http.Request) {
+	workflow, err := decodeWorkflow(r.Body)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, WorkflowValidationResponse{OK: false, Error: err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, s.store.ValidateWorkflow(workflow))
+}
+
 func decodeBlueprint(body io.Reader) (Blueprint, error) {
 	defer io.Copy(io.Discard, body)
 	var blueprint Blueprint
@@ -447,6 +575,17 @@ func decodeComposite(body io.Reader) (CompositeDefinition, error) {
 		return CompositeDefinition{}, err
 	}
 	return definition, nil
+}
+
+func decodeWorkflow(body io.Reader) (WorkflowDefinition, error) {
+	defer io.Copy(io.Discard, body)
+	var workflow WorkflowDefinition
+	decoder := json.NewDecoder(body)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&workflow); err != nil {
+		return WorkflowDefinition{}, err
+	}
+	return workflow, nil
 }
 
 func decodeCompositeFromSelection(body io.Reader) (CompositeFromSelectionRequest, error) {
