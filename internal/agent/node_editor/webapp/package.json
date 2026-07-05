@@ -3,8 +3,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "esbuild src/main.js --bundle --format=esm --target=es2022 --outdir=../web/assets --entry-names=app --asset-names=[name]-[hash] --legal-comments=none",
-    "check": "esbuild src/main.js --bundle --format=esm --target=es2022 --outfile=/tmp/bee-agent-node-editor-check.js --legal-comments=none"
+    "dev": "vite --host 127.0.0.1 --port 5173",
+    "build": "vite build",
+    "check": "vite build --mode check --outDir /tmp/bee-agent-node-editor-check"
   },
   "dependencies": {
     "@xyflow/react": "12.3.6",
@@ -12,6 +13,7 @@
     "react-dom": "18.3.1"
   },
   "devDependencies": {
-    "esbuild": "0.24.2"
+    "@vitejs/plugin-react": "4.3.4",
+    "vite": "6.0.11"
   }
 }

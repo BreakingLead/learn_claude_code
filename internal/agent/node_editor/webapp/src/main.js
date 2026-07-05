@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import "@xyflow/react/dist/style.css";
 import "./main.css";
@@ -38,7 +38,7 @@ function BlueprintNode({ data }) {
             type: "target",
             id: port.id,
             position: Position.Left,
-            style: { top: 54 + index * 22, background: portColors[port.type] || "#7f8da3" },
+            style: { background: portColors[port.type] || "#7f8da3" },
           }),
           React.createElement("span", {
             className: "dot",
@@ -55,7 +55,7 @@ function BlueprintNode({ data }) {
             type: "source",
             id: port.id,
             position: Position.Right,
-            style: { top: 54 + (inputs.length + index) * 22, background: portColors[port.type] || "#7f8da3" },
+            style: { background: portColors[port.type] || "#7f8da3" },
           }),
           React.createElement("span", {
             className: "dot",
@@ -348,6 +348,9 @@ function App() {
   const [workflowExecutionMode, setWorkflowExecutionMode] = useState("dry_run");
   const [workflowExternalCommand, setWorkflowExternalCommand] = useState("./scripts/workflow-dry-invoker");
   const [workflowTimeoutMS, setWorkflowTimeoutMS] = useState(30000);
+  const panelRef = useRef(null);
+  const [panelInspectorHeight, setPanelInspectorHeight] = useState(260);
+  const [panelResizing, setPanelResizing] = useState(false);
   const activeWorkflowPlan = workflowPlans.find((plan) => plan.id === activeWorkflowPlanId) || null;
   const activeWorkflowRun = workflowRuns.find((run) => run.id === activeWorkflowRunId) || null;
   const selectedWorkflowNode = (() => {
@@ -654,6 +657,30 @@ function App() {
   useEffect(() => {
     setConfigDraft(selectedNode ? JSON.stringify(selectedNode.config || {}, null, 2) : "");
   }, [selectedNodeId]);
+
+  useEffect(() => {
+    if (!panelResizing) return undefined;
+    const move = (event) => {
+      const panel = panelRef.current;
+      if (!panel) return;
+      const rect = panel.getBoundingClientRect();
+      const panelbarHeight = panel.querySelector(".panelbar")?.getBoundingClientRect().height || 44;
+      const minInspector = 120;
+      const minEditor = 160;
+      const next = event.clientY - rect.top - panelbarHeight;
+      const max = Math.max(minInspector, rect.height - panelbarHeight - minEditor);
+      setPanelInspectorHeight(Math.min(Math.max(next, minInspector), max));
+    };
+    const stop = () => setPanelResizing(false);
+    document.body.classList.add("panel-resizing");
+    window.addEventListener("mousemove", move);
+    window.addEventListener("mouseup", stop);
+    return () => {
+      document.body.classList.remove("panel-resizing");
+      window.removeEventListener("mousemove", move);
+      window.removeEventListener("mouseup", stop);
+    };
+  }, [panelResizing]);
 
   const validConnection = useCallback((connection) => {
     if (editorMode === "workflow") {
@@ -1675,9 +1702,14 @@ function App() {
           React.createElement(Controls, { key: "controls" }),
         ])
       ),
-      React.createElement("div", { className: "panel", key: "panel" }, [
+      React.createElement("div", {
+        className: "panel",
+        key: "panel",
+        ref: panelRef,
+        style: { "--inspector-height": `${panelInspectorHeight}px` },
+      }, [
         React.createElement("div", { className: "panelbar", key: "panelbar" }, [
-          React.createElement("span", { key: "label" },
+          React.createElement("span", { className: "panel-title", key: "label" },
             editorMode === "blueprint" ? "Blueprint JSON" : editorMode === "workflow" ? "Workflow JSON" : "Composite JSON"
           ),
           React.createElement("div", { className: "actions", key: "actions" }, [
@@ -2122,6 +2154,17 @@ function App() {
                 ? "Edit the reusable composite definition directly. Saving refreshes node templates."
                 : "No composite selected.")
             ),
+        React.createElement("div", {
+          className: "panel-resizer",
+          key: "panel-resizer",
+          role: "separator",
+          "aria-orientation": "horizontal",
+          title: "Drag to resize inspector",
+          onMouseDown: (event) => {
+            event.preventDefault();
+            setPanelResizing(true);
+          },
+        }),
         editorMode === "blueprint"
             ? React.createElement("textarea", {
               className: "json-editor",
