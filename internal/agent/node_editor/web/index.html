@@ -163,14 +163,17 @@
   <body>
     <div id="root"></div>
     <script type="module">
-      import React, { useCallback, useEffect, useMemo, useState } from "https://esm.sh/react@18.3.1";
+      import React, { useCallback, useEffect, useState } from "https://esm.sh/react@18.3.1";
       import { createRoot } from "https://esm.sh/react-dom@18.3.1/client";
       import ReactFlow, {
+        addEdge,
         Background,
         Controls,
         Handle,
         MarkerType,
         Position,
+        useEdgesState,
+        useNodesState,
       } from "https://esm.sh/@xyflow/react@12.3.6?deps=react@18.3.1,react-dom@18.3.1";
 
       const portColors = {
@@ -255,31 +258,133 @@
         }));
       }
 
+      function portFor(blueprint, nodeId, portId, direction) {
+        const node = (blueprint.nodes || []).find((item) => item.id === nodeId);
+        if (!node) return null;
+        const ports = direction === "output" ? node.outputs || [] : node.inputs || [];
+        return ports.find((port) => port.id === portId) || null;
+      }
+
+      function connectionError(blueprint, flowEdges, connection) {
+        if (!connection.source || !connection.target || !connection.sourceHandle || !connection.targetHandle) {
+          return "connection is incomplete";
+        }
+        const sourcePort = portFor(blueprint, connection.source, connection.sourceHandle, "output");
+        const targetPort = portFor(blueprint, connection.target, connection.targetHandle, "input");
+        if (!sourcePort) return `source port not found: ${connection.source}.${connection.sourceHandle}`;
+        if (!targetPort) return `target port not found: ${connection.target}.${connection.targetHandle}`;
+        if (sourcePort.type !== targetPort.type) {
+          return `cannot connect ${sourcePort.type} to ${targetPort.type}`;
+        }
+        const duplicate = flowEdges.some((edge) =>
+          edge.source === connection.source &&
+          edge.sourceHandle === connection.sourceHandle &&
+          edge.target === connection.target &&
+          edge.targetHandle === connection.targetHandle
+        );
+        if (duplicate) return "connection already exists";
+        if (!targetPort.multiple) {
+          const existing = flowEdges.some((edge) => edge.target === connection.target && edge.targetHandle === connection.targetHandle);
+          if (existing) return `${connection.target}.${connection.targetHandle} accepts one connection`;
+        }
+        return "";
+      }
+
+      function edgeFromConnection(connection) {
+        return {
+          id: `edge-${connection.source}-${connection.sourceHandle}-${connection.target}-${connection.targetHandle}-${Date.now()}`,
+          source: { node: connection.source, port: connection.sourceHandle },
+          target: { node: connection.target, port: connection.targetHandle },
+        };
+      }
+
       function App() {
         const [blueprint, setBlueprint] = useState(null);
         const [source, setSource] = useState("");
         const [status, setStatus] = useState("loading default blueprint");
+        const [nodes, setNodes, onNodesChange] = useNodesState([]);
+        const [edges, setEdges, onEdgesChange] = useEdgesState([]);
+
+        const setBlueprintDocument = useCallback((next, message) => {
+          setBlueprint(next);
+          setSource(JSON.stringify(next, null, 2));
+          setNodes(toFlowNodes(next));
+          setEdges(toFlowEdges(next));
+          if (message) setStatus(message);
+        }, [setEdges, setNodes]);
 
         const load = useCallback(async () => {
           const response = await fetch("/api/blueprints/default");
           const data = await response.json();
-          setBlueprint(data);
-          setSource(JSON.stringify(data, null, 2));
-          setStatus("loaded default blueprint");
-        }, []);
+          setBlueprintDocument(data, "loaded default blueprint");
+        }, [setBlueprintDocument]);
 
         useEffect(() => {
           load().catch((error) => setStatus(`load failed: ${error.message}`));
         }, [load]);
 
-        const nodes = useMemo(() => (blueprint ? toFlowNodes(blueprint) : []), [blueprint]);
-        const edges = useMemo(() => (blueprint ? toFlowEdges(blueprint) : []), [blueprint]);
+        const validConnection = useCallback((connection) => {
+          if (!blueprint) return false;
+          return connectionError(blueprint, edges, connection) === "";
+        }, [blueprint, edges]);
 
         const parseSource = () => {
           const next = JSON.parse(source);
-          setBlueprint(next);
+          setBlueprintDocument(next);
           return next;
         };
+
+        const connect = useCallback((connection) => {
+          if (!blueprint) return;
+          const error = connectionError(blueprint, edges, connection);
+          if (error) {
+            setStatus(`connection rejected: ${error}`);
+            return;
+          }
+          const edge = edgeFromConnection(connection);
+          const next = {
+            ...blueprint,
+            edges: [...(blueprint.edges || []), edge],
+          };
+          setBlueprint(next);
+          setSource(JSON.stringify(next, null, 2));
+          setEdges((current) => addEdge({
+            id: edge.id,
+            source: edge.source.node,
+            sourceHandle: edge.source.port,
+            target: edge.target.node,
+            targetHandle: edge.target.port,
+            markerEnd: { type: MarkerType.ArrowClosed },
+            style: { stroke: "#7f8da3" },
+          }, current));
+          setStatus("connected");
+        }, [blueprint, edges, setEdges]);
+
+        const updateNodePosition = useCallback((_, node) => {
+          if (!blueprint) return;
+          const next = {
+            ...blueprint,
+            nodes: (blueprint.nodes || []).map((item) =>
+              item.id === node.id
+                ? { ...item, position: { x: Math.round(node.position.x), y: Math.round(node.position.y) } }
+                : item
+            ),
+          };
+          setBlueprint(next);
+          setSource(JSON.stringify(next, null, 2));
+        }, [blueprint]);
+
+        const deleteEdges = useCallback((deleted) => {
+          if (!blueprint || deleted.length === 0) return;
+          const deletedIDs = new Set(deleted.map((edge) => edge.id));
+          const next = {
+            ...blueprint,
+            edges: (blueprint.edges || []).filter((edge) => !deletedIDs.has(edge.id)),
+          };
+          setBlueprint(next);
+          setSource(JSON.stringify(next, null, 2));
+          setStatus("edge removed");
+        }, [blueprint]);
 
         const validate = async () => {
           try {
@@ -322,6 +427,12 @@
                 nodes,
                 edges,
                 nodeTypes,
+                onNodesChange,
+                onEdgesChange,
+                onConnect: connect,
+                onEdgesDelete: deleteEdges,
+                onNodeDragStop: updateNodePosition,
+                isValidConnection: validConnection,
                 fitView: true,
               }, [
                 React.createElement(Background, { key: "background", color: "#303746" }),
