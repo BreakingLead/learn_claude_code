@@ -1317,6 +1317,26 @@
                     React.createElement("div", { className: "muted", key: "blueprint" },
                       `${agent.node_id} -> ${agent.blueprint_name ? `${agent.blueprint_name} (${agent.blueprint_id})` : agent.blueprint_id}`
                     ),
+                    (agent.tool_names || []).length > 0
+                      ? React.createElement("div", { className: "chip-row", key: "tools" },
+                          agent.tool_names.map((tool) => React.createElement("span", { className: "chip", key: tool }, tool))
+                        )
+                      : React.createElement("div", { className: "muted", key: "no-tools" }, "No tools resolved."),
+                    (agent.prompt_blocks || []).length > 0
+                      ? React.createElement("div", { className: "field", key: "prompts" }, [
+                          React.createElement("label", { key: "label" }, "Prompt blocks"),
+                          ...agent.prompt_blocks.map((block) =>
+                            React.createElement("pre", { className: "code-preview", key: block.node_id },
+                              `${block.name} [${block.source}]\n${block.preview || "(empty)"}`
+                            )
+                          ),
+                        ])
+                      : React.createElement("div", { className: "muted", key: "no-prompts" }, "No prompt blocks resolved."),
+                    (agent.diagnostics || []).length > 0
+                      ? React.createElement("div", { className: "diagnostics", key: "diagnostics" },
+                          agent.diagnostics.map((item) => React.createElement("div", { key: item }, item))
+                        )
+                      : null,
                   ])),
                 ])
               : React.createElement("div", { className: "muted", key: "no-agents" }, "No workflow agents."),

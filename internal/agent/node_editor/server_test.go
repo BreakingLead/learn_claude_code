@@ -334,6 +334,12 @@ func TestServerWorkflowAPI(t *testing.T) {
 	if len(validation.Agents) != 3 || validation.Agents[0].BlueprintID != "default" {
 		t.Fatalf("unexpected workflow agent resolutions: %+v", validation.Agents)
 	}
+	if !containsNodeID(validation.Agents[0].ToolNames, "bash") {
+		t.Fatalf("expected workflow agent tool summary, got %+v", validation.Agents[0])
+	}
+	if len(validation.Agents[0].PromptBlocks) == 0 {
+		t.Fatalf("expected workflow agent prompt summary, got %+v", validation.Agents[0])
+	}
 	if len(validation.Diagnostics) != 0 {
 		t.Fatalf("unexpected workflow diagnostics: %+v", validation.Diagnostics)
 	}

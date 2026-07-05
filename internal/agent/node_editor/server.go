@@ -93,10 +93,13 @@ type WorkflowSimulationResponse struct {
 }
 
 type WorkflowAgentResolution struct {
-	NodeID        string `json:"node_id"`
-	Label         string `json:"label"`
-	BlueprintID   string `json:"blueprint_id"`
-	BlueprintName string `json:"blueprint_name,omitempty"`
+	NodeID        string               `json:"node_id"`
+	Label         string               `json:"label"`
+	BlueprintID   string               `json:"blueprint_id"`
+	BlueprintName string               `json:"blueprint_name,omitempty"`
+	ToolNames     []string             `json:"tool_names,omitempty"`
+	PromptBlocks  []PromptPreviewBlock `json:"prompt_blocks,omitempty"`
+	Diagnostics   []string             `json:"diagnostics,omitempty"`
 }
 
 func NewStore(workdir string) *Store {
@@ -490,12 +493,38 @@ func (s *Store) ResolveWorkflowAgents(workflow WorkflowDefinition) []WorkflowAge
 			Label:       node.Label,
 			BlueprintID: id,
 		}
-		if blueprint, err := s.ReadAgent(id); err == nil {
-			resolution.BlueprintName = blueprint.Name
-		}
+		s.populateWorkflowAgentResolution(&resolution, id)
 		agents = append(agents, resolution)
 	}
 	return agents
+}
+
+func (s *Store) populateWorkflowAgentResolution(resolution *WorkflowAgentResolution, id string) {
+	blueprint, err := s.ReadAgent(id)
+	if err != nil {
+		resolution.Diagnostics = append(resolution.Diagnostics, "read blueprint: "+err.Error())
+		return
+	}
+	resolution.BlueprintName = blueprint.Name
+	expanded, err := ExpandComposites(blueprint, s)
+	if err != nil {
+		resolution.Diagnostics = append(resolution.Diagnostics, "expand composites: "+err.Error())
+		return
+	}
+	if err := Validate(expanded); err != nil {
+		resolution.Diagnostics = append(resolution.Diagnostics, "validate blueprint: "+err.Error())
+		return
+	}
+	resolved, err := Resolve(expanded)
+	if err != nil {
+		resolution.Diagnostics = append(resolution.Diagnostics, "resolve blueprint: "+err.Error())
+		return
+	}
+	capabilities := EffectiveToolNames(expanded, resolved)
+	resolution.ToolNames = capabilities.ToolNames
+	resolution.PromptBlocks = PromptPreview(expanded, resolved)
+	resolution.Diagnostics = append(resolution.Diagnostics, ConfigDiagnostics(expanded, resolved)...)
+	resolution.Diagnostics = append(resolution.Diagnostics, capabilities.Diagnostics...)
 }
 
 func NewServer(workdir string) *Server {
