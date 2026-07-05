@@ -49,6 +49,9 @@ func TestWorkflowExecutionPlanShowsDataFlow(t *testing.T) {
 	if !containsNodeID(summary.OutputsTo, "output") {
 		t.Fatalf("unexpected summary outputs: %+v", summary)
 	}
+	if !strings.Contains(summary.Instruction, "Merge upstream") {
+		t.Fatalf("expected summary instruction in execution plan, got %+v", summary)
+	}
 }
 
 func TestSimulateWorkflowShowsMessageHandoff(t *testing.T) {
@@ -66,6 +69,9 @@ func TestSimulateWorkflowShowsMessageHandoff(t *testing.T) {
 	}
 	if len(developer.Outputs) != 1 || !strings.Contains(developer.Outputs[0].Content, "Developer Agent") {
 		t.Fatalf("unexpected developer output: %+v", developer)
+	}
+	if !strings.Contains(developer.Outputs[0].Content, "Implement the requested change") {
+		t.Fatalf("expected developer instruction in simulation output: %+v", developer)
 	}
 	output := workflowSimulationStepByNodeID(steps, "output")
 	if len(output.Inputs) != 1 || output.Inputs[0].FromNode != "summary" {

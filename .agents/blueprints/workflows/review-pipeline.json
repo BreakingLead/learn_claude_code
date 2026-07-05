@@ -44,7 +44,10 @@
           "label": "Output",
           "direction": "output"
         }
-      ]
+      ],
+      "config": {
+        "instruction": "Implement the requested change and emit a concise development result."
+      }
     },
     {
       "id": "reviewer",
@@ -70,7 +73,10 @@
           "label": "Output",
           "direction": "output"
         }
-      ]
+      ],
+      "config": {
+        "instruction": "Review the requested change independently and emit risks, regressions, and test gaps."
+      }
     },
     {
       "id": "summary",
@@ -97,7 +103,10 @@
           "label": "Output",
           "direction": "output"
         }
-      ]
+      ],
+      "config": {
+        "instruction": "Merge upstream development and review results into a final user-facing summary."
+      }
     },
     {
       "id": "output",

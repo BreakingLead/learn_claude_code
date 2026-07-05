@@ -576,6 +576,7 @@
           agent_blueprint: agentBlueprint || "default",
           inputs: [{ id: "input", type: "message", label: "Input", direction: "input" }],
           outputs: [{ id: "output", type: "message", label: "Output", direction: "output" }],
+          config: { instruction: "Describe this workflow agent's local responsibility." },
         };
       }
 
@@ -1300,6 +1301,9 @@
                     step.agent_blueprint
                       ? React.createElement("div", { className: "muted", key: "agent" }, `agent: ${step.agent_blueprint}`)
                       : null,
+                    step.instruction
+                      ? React.createElement("div", { className: "muted", key: "instruction" }, `instruction: ${step.instruction}`)
+                      : null,
                     React.createElement("div", { className: "muted", key: "inputs" },
                       `from: ${(step.inputs_from || []).join(", ") || "(start)"}`
                     ),
@@ -1363,6 +1367,9 @@
               React.createElement("div", { className: "muted", key: "type" }, `type: ${step.type}`),
               step.agent_blueprint
                 ? React.createElement("div", { className: "muted", key: "agent" }, `agent: ${step.agent_blueprint}`)
+                : null,
+              step.instruction
+                ? React.createElement("div", { className: "muted", key: "instruction" }, `instruction: ${step.instruction}`)
                 : null,
               (step.inputs || []).length > 0
                 ? React.createElement("div", { className: "field", key: "inputs" }, [
@@ -1796,6 +1803,20 @@
                                 }, blueprints.map((item) =>
                                   React.createElement("option", { key: item.id, value: item.id }, item.name ? `${item.name} (${item.id})` : item.id)
                                 )),
+                              ])
+                            : null,
+                          selectedWorkflowNode.type === "workflow_agent"
+                            ? React.createElement("div", { className: "field", key: "workflow-agent-instruction" }, [
+                                React.createElement("label", { key: "label" }, "Instruction"),
+                                React.createElement("textarea", {
+                                  className: "config-editor",
+                                  key: "textarea",
+                                  value: selectedWorkflowNode.config?.instruction || "",
+                                  spellCheck: "false",
+                                  onChange: (event) => updateSelectedWorkflowNode({
+                                    config: { ...(selectedWorkflowNode.config || {}), instruction: event.target.value },
+                                  }),
+                                }),
                               ])
                             : null,
                           React.createElement("button", {

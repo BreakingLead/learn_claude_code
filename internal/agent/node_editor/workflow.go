@@ -41,6 +41,7 @@ type WorkflowExecutionStep struct {
 	Type           string   `json:"type"`
 	Label          string   `json:"label"`
 	AgentBlueprint string   `json:"agent_blueprint,omitempty"`
+	Instruction    string   `json:"instruction,omitempty"`
 	InputsFrom     []string `json:"inputs_from,omitempty"`
 	OutputsTo      []string `json:"outputs_to,omitempty"`
 }
@@ -50,6 +51,7 @@ type WorkflowSimulationStep struct {
 	Type           string                     `json:"type"`
 	Label          string                     `json:"label"`
 	AgentBlueprint string                     `json:"agent_blueprint,omitempty"`
+	Instruction    string                     `json:"instruction,omitempty"`
 	Inputs         []WorkflowSimulationInput  `json:"inputs,omitempty"`
 	Outputs        []WorkflowSimulationOutput `json:"outputs,omitempty"`
 }
@@ -88,6 +90,9 @@ func DefaultWorkflow() WorkflowDefinition {
 				Position:       Position{X: 340, Y: 80},
 				Inputs:         []Port{{ID: "input", Type: PortTypeMessage, Label: "Input", Direction: DirectionInput}},
 				Outputs:        []Port{{ID: "output", Type: PortTypeMessage, Label: "Output", Direction: DirectionOutput}},
+				Config: map[string]any{
+					"instruction": "Implement the requested change and emit a concise development result.",
+				},
 			},
 			{
 				ID:             "reviewer",
@@ -97,6 +102,9 @@ func DefaultWorkflow() WorkflowDefinition {
 				Position:       Position{X: 340, Y: 280},
 				Inputs:         []Port{{ID: "input", Type: PortTypeMessage, Label: "Input", Direction: DirectionInput}},
 				Outputs:        []Port{{ID: "output", Type: PortTypeMessage, Label: "Output", Direction: DirectionOutput}},
+				Config: map[string]any{
+					"instruction": "Review the requested change independently and emit risks, regressions, and test gaps.",
+				},
 			},
 			{
 				ID:             "summary",
@@ -106,6 +114,9 @@ func DefaultWorkflow() WorkflowDefinition {
 				Position:       Position{X: 620, Y: 180},
 				Inputs:         []Port{{ID: "input", Type: PortTypeMessage, Label: "Inputs", Direction: DirectionInput, Multiple: true}},
 				Outputs:        []Port{{ID: "output", Type: PortTypeMessage, Label: "Output", Direction: DirectionOutput}},
+				Config: map[string]any{
+					"instruction": "Merge upstream development and review results into a final user-facing summary.",
+				},
 			},
 			{
 				ID:       "output",
@@ -297,6 +308,7 @@ func WorkflowExecutionPlan(workflow WorkflowDefinition) ([]WorkflowExecutionStep
 			Type:           node.Type,
 			Label:          node.Label,
 			AgentBlueprint: node.AgentBlueprint,
+			Instruction:    workflowNodeInstruction(node),
 			InputsFrom:     sortedUniqueStrings(inputs[node.ID]),
 			OutputsTo:      sortedUniqueStrings(outputs[node.ID]),
 		})
@@ -337,6 +349,7 @@ func SimulateWorkflow(workflow WorkflowDefinition, input string) ([]WorkflowSimu
 			Type:           node.Type,
 			Label:          node.Label,
 			AgentBlueprint: node.AgentBlueprint,
+			Instruction:    workflowNodeInstruction(node),
 			Inputs:         stepInputs,
 			Outputs:        outputs,
 		})
@@ -372,6 +385,9 @@ func WorkflowDiagnostics(workflow WorkflowDefinition) []string {
 			}
 			if outgoing[node.ID] == 0 {
 				diagnostics = append(diagnostics, fmt.Sprintf("agent node %q has no outgoing message", node.ID))
+			}
+			if workflowNodeInstruction(node) == "" {
+				diagnostics = append(diagnostics, fmt.Sprintf("agent node %q has no local instruction", node.ID))
 			}
 		case WorkflowNodeTypeInput:
 			if outgoing[node.ID] == 0 {
@@ -491,7 +507,11 @@ func workflowSimulationContent(node WorkflowNode, inputs []WorkflowSimulationInp
 		for _, input := range inputs {
 			from = append(from, input.FromNode+"."+input.FromPort)
 		}
-		return fmt.Sprintf("[Simulated %s via %s]\nInputs: %s", label, node.AgentBlueprint, strings.Join(from, ", "))
+		instruction := workflowNodeInstruction(node)
+		if instruction == "" {
+			return fmt.Sprintf("[Simulated %s via %s]\nInputs: %s", label, node.AgentBlueprint, strings.Join(from, ", "))
+		}
+		return fmt.Sprintf("[Simulated %s via %s]\nInstruction: %s\nInputs: %s", label, node.AgentBlueprint, instruction, strings.Join(from, ", "))
 	default:
 		var parts []string
 		for _, input := range inputs {
@@ -515,6 +535,10 @@ func workflowSimulationTargets(portID string, outgoing []Edge) []Endpoint {
 
 func endpointKey(endpoint Endpoint) string {
 	return endpoint.Node + ":" + endpoint.Port
+}
+
+func workflowNodeInstruction(node WorkflowNode) string {
+	return stringNodeConfig(node.Config, "instruction")
 }
 
 func unreachableWorkflowNodes(nodes map[string]WorkflowNode, edges []Edge, roots []string) []string {
