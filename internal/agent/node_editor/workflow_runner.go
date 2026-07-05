@@ -1,6 +1,7 @@
 package nodeeditor
 
 import (
+	"context"
 	"fmt"
 	"strings"
 )
@@ -56,12 +57,39 @@ type WorkflowPlanRunOutput struct {
 	Inputs  []WorkflowPlanRunInput `json:"inputs,omitempty"`
 }
 
-func (s *Store) RunWorkflowPlan(id string, input string) (WorkflowPlanRun, error) {
+type PlanExecutor struct {
+	Invoker AgentInvoker
+}
+
+type AgentInvoker interface {
+	InvokeAgent(context.Context, AgentInvocation) (AgentInvocationResult, error)
+}
+
+type AgentInvocation struct {
+	Run    WorkflowCompiledRun    `json:"run"`
+	Inputs []WorkflowPlanRunInput `json:"inputs,omitempty"`
+}
+
+type AgentInvocationResult struct {
+	Content     string   `json:"content"`
+	Diagnostics []string `json:"diagnostics,omitempty"`
+}
+
+type DryRunAgentInvoker struct{}
+
+func NewDryRunPlanExecutor() PlanExecutor {
+	return PlanExecutor{Invoker: DryRunAgentInvoker{}}
+}
+
+func (s *Store) RunWorkflowPlan(ctx context.Context, id string, input string) (WorkflowPlanRun, error) {
 	plan, err := s.ReadWorkflowPlan(id)
 	if err != nil {
 		return WorkflowPlanRun{}, err
 	}
-	run := RunCompiledWorkflowPlan(plan, input)
+	run, err := NewDryRunPlanExecutor().Execute(ctx, plan, input)
+	if err != nil {
+		return WorkflowPlanRun{}, err
+	}
 	currentHash, stale := s.currentWorkflowHash(plan.WorkflowID, plan.SourceHash)
 	run.CurrentHash = currentHash
 	run.Stale = stale
@@ -72,6 +100,24 @@ func (s *Store) RunWorkflowPlan(id string, input string) (WorkflowPlanRun, error
 }
 
 func RunCompiledWorkflowPlan(plan WorkflowCompiledPlan, input string) WorkflowPlanRun {
+	run, err := NewDryRunPlanExecutor().Execute(context.Background(), plan, input)
+	if err != nil {
+		return WorkflowPlanRun{
+			WorkflowID:  plan.WorkflowID,
+			Name:        plan.Name,
+			SourceHash:  plan.SourceHash,
+			Input:       input,
+			Diagnostics: []string{err.Error()},
+		}
+	}
+	return run
+}
+
+func (e PlanExecutor) Execute(ctx context.Context, plan WorkflowCompiledPlan, input string) (WorkflowPlanRun, error) {
+	invoker := e.Invoker
+	if invoker == nil {
+		invoker = DryRunAgentInvoker{}
+	}
 	if strings.TrimSpace(input) == "" {
 		input = "Sample workflow input"
 	}
@@ -85,8 +131,14 @@ func RunCompiledWorkflowPlan(plan WorkflowCompiledPlan, input string) WorkflowPl
 	}
 
 	for _, agentRun := range plan.AgentRuns {
+		if err := ctx.Err(); err != nil {
+			return WorkflowPlanRun{}, err
+		}
 		stepInputs := workflowPlanRunInputs(agentRun.Inputs, messages, input)
-		content := workflowPlanDryRunContent(agentRun, stepInputs)
+		result, err := invoker.InvokeAgent(ctx, AgentInvocation{Run: agentRun, Inputs: stepInputs})
+		if err != nil {
+			return WorkflowPlanRun{}, fmt.Errorf("invoke agent %q: %w", agentRun.NodeID, err)
+		}
 		step := WorkflowPlanRunStep{
 			NodeID:      agentRun.NodeID,
 			Label:       agentRun.Label,
@@ -94,14 +146,15 @@ func RunCompiledWorkflowPlan(plan WorkflowCompiledPlan, input string) WorkflowPl
 			Instruction: agentRun.Instruction,
 			Inputs:      stepInputs,
 		}
+		run.Diagnostics = append(run.Diagnostics, result.Diagnostics...)
 		for _, output := range agentRun.Outputs {
 			stepOutput := WorkflowPlanRunStepOutput{
 				Port:    output.Port,
-				Content: content,
+				Content: result.Content,
 				To:      append([]Endpoint(nil), output.To...),
 			}
 			step.Outputs = append(step.Outputs, stepOutput)
-			messages[endpointKey(Endpoint{Node: agentRun.NodeID, Port: output.Port})] = content
+			messages[endpointKey(Endpoint{Node: agentRun.NodeID, Port: output.Port})] = result.Content
 		}
 		run.Steps = append(run.Steps, step)
 	}
@@ -115,7 +168,16 @@ func RunCompiledWorkflowPlan(plan WorkflowCompiledPlan, input string) WorkflowPl
 			Inputs:  inputs,
 		})
 	}
-	return run
+	return run, nil
+}
+
+func (DryRunAgentInvoker) InvokeAgent(ctx context.Context, invocation AgentInvocation) (AgentInvocationResult, error) {
+	if err := ctx.Err(); err != nil {
+		return AgentInvocationResult{}, err
+	}
+	return AgentInvocationResult{
+		Content: workflowPlanDryRunContent(invocation.Run, invocation.Inputs),
+	}, nil
 }
 
 func workflowPlanRunInputs(inputs []WorkflowCompiledInput, messages map[string]string, fallback string) []WorkflowPlanRunInput {

@@ -959,7 +959,7 @@ func (s *Server) handleRunWorkflowPlan(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, WorkflowPlanRunResponse{OK: false, Error: err.Error()})
 		return
 	}
-	run, err := s.store.RunWorkflowPlan(r.PathValue("id"), request.Input)
+	run, err := s.store.RunWorkflowPlan(r.Context(), r.PathValue("id"), request.Input)
 	if err != nil {
 		writeJSON(w, http.StatusOK, WorkflowPlanRunResponse{OK: false, Error: err.Error()})
 		return
