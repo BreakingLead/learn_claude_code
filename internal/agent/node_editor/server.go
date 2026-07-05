@@ -667,6 +667,14 @@ func (s *Store) SaveCompiledWorkflowPlan(workflow WorkflowDefinition) (WorkflowC
 	return plan, path, nil
 }
 
+func (s *Store) RefreshWorkflowPlan(id string) (WorkflowCompiledPlan, string, error) {
+	workflow, err := s.ReadWorkflow(id)
+	if err != nil {
+		return WorkflowCompiledPlan{}, "", err
+	}
+	return s.SaveCompiledWorkflowPlan(workflow)
+}
+
 func (s *Store) currentWorkflowHash(id string, sourceHash string) (string, bool) {
 	workflow, err := s.ReadWorkflow(id)
 	if err != nil {
@@ -775,6 +783,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/workflows/{id}/compiled-plan", s.handleSaveCompiledWorkflowPlan)
 	mux.HandleFunc("GET /api/workflow-plans", s.handleListWorkflowPlans)
 	mux.HandleFunc("GET /api/workflow-plans/{id}", s.handleGetWorkflowPlan)
+	mux.HandleFunc("POST /api/workflow-plans/{id}/refresh", s.handleRefreshWorkflowPlan)
 	mux.HandleFunc("DELETE /api/workflow-plans/{id}", s.handleDeleteWorkflowPlan)
 	static, _ := fs.Sub(webFS, "web")
 	mux.Handle("GET /", http.FileServer(http.FS(static)))
@@ -932,6 +941,15 @@ func (s *Server) handleDeleteWorkflowPlan(w http.ResponseWriter, r *http.Request
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func (s *Server) handleRefreshWorkflowPlan(w http.ResponseWriter, r *http.Request) {
+	plan, path, err := s.store.RefreshWorkflowPlan(r.PathValue("id"))
+	if err != nil {
+		writeJSON(w, http.StatusOK, WorkflowCompiledPlanSaveResponse{OK: false, Error: err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, WorkflowCompiledPlanSaveResponse{OK: true, Path: path, Plan: plan})
 }
 
 func (s *Server) handleCreateWorkflow(w http.ResponseWriter, r *http.Request) {

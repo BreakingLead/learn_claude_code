@@ -734,6 +734,25 @@
           }
         };
 
+        const refreshWorkflowPlan = async () => {
+          if (!activeWorkflowPlanId) return;
+          try {
+            const response = await fetch(`/api/workflow-plans/${activeWorkflowPlanId}/refresh`, { method: "POST" });
+            const result = await response.json();
+            if (!response.ok || !result.ok) {
+              setStatus(`workflow plan refresh failed: ${result.error || response.statusText}`);
+              return;
+            }
+            setWorkflowCompileResult({ ok: true, plan: { ...(result.plan || {}), stale: false, current_hash: result.plan?.source_hash || "" } });
+            setCompiledPlanPath(result.path || "");
+            setActiveWorkflowPlanId(result.plan?.workflow_id || activeWorkflowPlanId);
+            await loadWorkflowPlans();
+            setStatus(`workflow plan refreshed: ${result.path || "(unknown path)"}`);
+          } catch (error) {
+            setStatus(`workflow plan refresh failed: ${error.message}`);
+          }
+        };
+
         const loadTemplates = useCallback(async () => {
           try {
             const response = await fetch("/api/node-templates");
@@ -1739,6 +1758,13 @@
                         disabled: !activeWorkflowPlanId,
                         onClick: () => loadWorkflowPlan(activeWorkflowPlanId).catch((error) => setStatus(`workflow plan load failed: ${error.message}`)),
                       }, "Load Plan")
+                    : null,
+                  editorMode === "workflow"
+                    ? React.createElement("button", {
+                        key: "refresh-workflow-plan",
+                        disabled: !activeWorkflowPlanId,
+                        onClick: refreshWorkflowPlan,
+                      }, "Refresh Plan")
                     : null,
                   editorMode === "workflow"
                     ? React.createElement("button", {

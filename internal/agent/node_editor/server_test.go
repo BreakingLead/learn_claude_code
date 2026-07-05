@@ -633,6 +633,52 @@ func TestServerDeleteWorkflowPlanAPI(t *testing.T) {
 	}
 }
 
+func TestServerRefreshWorkflowPlanAPI(t *testing.T) {
+	workdir := t.TempDir()
+	if _, err := EnsureDefaultBlueprint(DefaultBlueprintPath(workdir)); err != nil {
+		t.Fatal(err)
+	}
+	store := NewStore(workdir)
+	workflow := DefaultWorkflow()
+	if err := store.WriteWorkflow("review-pipeline", workflow); err != nil {
+		t.Fatal(err)
+	}
+	original, _, err := store.SaveCompiledWorkflowPlan(workflow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	workflow.Name = "Changed Review Pipeline"
+	if err := store.WriteWorkflow("review-pipeline", workflow); err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(NewServer(workdir).Handler())
+	defer server.Close()
+
+	resp, err := http.Post(server.URL+"/api/workflow-plans/review-pipeline/refresh", "application/json", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("refresh workflow plan status = %d", resp.StatusCode)
+	}
+	var payload WorkflowCompiledPlanSaveResponse
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatal(err)
+	}
+	if !payload.OK || payload.Plan.SourceHash == "" || payload.Plan.SourceHash == original.SourceHash {
+		t.Fatalf("unexpected refresh payload: %+v", payload)
+	}
+
+	summaries, err := store.ListWorkflowPlans()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(summaries) != 1 || summaries[0].Stale {
+		t.Fatalf("expected refreshed plan to be fresh: %+v", summaries)
+	}
+}
+
 func TestServerCreateWorkflowAPI(t *testing.T) {
 	workdir := t.TempDir()
 	if _, err := EnsureDefaultBlueprint(DefaultBlueprintPath(workdir)); err != nil {
