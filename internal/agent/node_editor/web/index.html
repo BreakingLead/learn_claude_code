@@ -355,49 +355,21 @@
         return `${prefix}-${Date.now()}`;
       }
 
-      function nodeTemplate(kind, blueprint) {
-        const basePosition = { x: 120, y: 520 + (blueprint.nodes || []).length * 40 };
-        if (kind === "skill") {
-          const id = nextNodeId(blueprint, "skill");
-          return {
-            id,
-            type: "skill",
-            label: "Skill",
-            position: basePosition,
-            outputs: [{ id: "prompt_out", type: "prompt", label: "Prompt", direction: "output" }],
-            config: { source: "inline", prompt: "Write skill instructions here." },
-          };
-        }
-        if (kind === "toolset") {
-          const id = nextNodeId(blueprint, "toolset");
-          return {
-            id,
-            type: "toolset",
-            label: "Toolset",
-            position: basePosition,
-            outputs: [{ id: "toolset_out", type: "toolset", label: "Toolset", direction: "output" }],
-            config: { tools: ["read_file", "glob"] },
-          };
-        }
-        if (kind === "memory") {
-          const id = nextNodeId(blueprint, "memory");
-          return {
-            id,
-            type: "memory",
-            label: "Memory",
-            position: basePosition,
-            outputs: [{ id: "memory_out", type: "memory", label: "Memory", direction: "output" }],
-            config: { source: "default_memory" },
-          };
-        }
-        const id = nextNodeId(blueprint, "prompt");
+      const fallbackTemplates = [
+        { type: "prompt", label: "Prompt", node: { type: "prompt", label: "Prompt", outputs: [{ id: "prompt_out", type: "prompt", label: "Prompt", direction: "output" }], config: { source: "inline", prompt: "Write prompt text here." } } },
+        { type: "skill", label: "Skill", node: { type: "skill", label: "Skill", outputs: [{ id: "prompt_out", type: "prompt", label: "Prompt", direction: "output" }], config: { source: "inline", prompt: "Write skill instructions here." } } },
+        { type: "toolset", label: "Toolset", node: { type: "toolset", label: "Toolset", outputs: [{ id: "toolset_out", type: "toolset", label: "Toolset", direction: "output" }], config: { tools: ["read_file", "glob"] } } },
+        { type: "memory", label: "Memory", node: { type: "memory", label: "Memory", outputs: [{ id: "memory_out", type: "memory", label: "Memory", direction: "output" }], config: { source: "default_memory" } } },
+      ];
+
+      function nodeFromTemplate(template, blueprint) {
+        const id = nextNodeId(blueprint, slug(template.type || template.label));
         return {
+          ...(template.node || {}),
           id,
-          type: "prompt",
-          label: "Prompt",
-          position: basePosition,
-          outputs: [{ id: "prompt_out", type: "prompt", label: "Prompt", direction: "output" }],
-          config: { source: "inline", prompt: "Write prompt text here." },
+          label: template.node?.label || template.label || id,
+          position: { x: 120, y: 520 + (blueprint.nodes || []).length * 40 },
+          config: { ...(template.node?.config || {}) },
         };
       }
 
@@ -410,6 +382,7 @@
         const [selectedNodeId, setSelectedNodeId] = useState("");
         const selectedNode = (blueprint?.nodes || []).find((node) => node.id === selectedNodeId) || null;
         const [configDraft, setConfigDraft] = useState("");
+        const [templates, setTemplates] = useState(fallbackTemplates);
 
         const updateDocument = useCallback((next, message) => {
           setBlueprint(next);
@@ -437,6 +410,17 @@
         }, [load]);
 
         useEffect(() => {
+          fetch("/api/node-templates")
+            .then((response) => response.json())
+            .then((data) => {
+              if (Array.isArray(data.templates) && data.templates.length > 0) {
+                setTemplates(data.templates);
+              }
+            })
+            .catch(() => setTemplates(fallbackTemplates));
+        }, []);
+
+        useEffect(() => {
           setConfigDraft(selectedNode ? JSON.stringify(selectedNode.config || {}, null, 2) : "");
         }, [selectedNodeId]);
 
@@ -451,9 +435,9 @@
           return next;
         };
 
-        const addNode = useCallback((kind) => {
+        const addNode = useCallback((template) => {
           if (!blueprint) return;
-          const node = nodeTemplate(kind, blueprint);
+          const node = nodeFromTemplate(template, blueprint);
           const next = {
             ...blueprint,
             nodes: [...(blueprint.nodes || []), node],
@@ -586,12 +570,15 @@
         return React.createElement("div", { className: "app" }, [
           React.createElement("div", { className: "topbar", key: "topbar" }, [
             React.createElement("div", { className: "brand", key: "brand" }, "Bee Agent Builder"),
-            React.createElement("div", { className: "actions", key: "palette" }, [
-              React.createElement("button", { key: "add-prompt", onClick: () => addNode("prompt") }, "+ Prompt"),
-              React.createElement("button", { key: "add-skill", onClick: () => addNode("skill") }, "+ Skill"),
-              React.createElement("button", { key: "add-toolset", onClick: () => addNode("toolset") }, "+ Toolset"),
-              React.createElement("button", { key: "add-memory", onClick: () => addNode("memory") }, "+ Memory"),
-            ]),
+            React.createElement("div", { className: "actions", key: "palette" },
+              templates.map((template) =>
+                React.createElement("button", {
+                  key: `add-${template.type}`,
+                  title: template.description || template.label,
+                  onClick: () => addNode(template),
+                }, `+ ${template.label}`)
+              )
+            ),
             React.createElement("div", { className: "status", key: "status" }, status),
           ]),
           React.createElement("div", { className: "layout", key: "layout" }, [

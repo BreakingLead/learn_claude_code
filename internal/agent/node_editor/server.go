@@ -100,6 +100,7 @@ func NewServer(workdir string) *Server {
 
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/node-templates", s.handleNodeTemplates)
 	mux.HandleFunc("GET /api/blueprints", s.handleListBlueprints)
 	mux.HandleFunc("GET /api/blueprints/{id}", s.handleGetBlueprint)
 	mux.HandleFunc("PUT /api/blueprints/{id}", s.handlePutBlueprint)
@@ -107,6 +108,10 @@ func (s *Server) Handler() http.Handler {
 	static, _ := fs.Sub(webFS, "web")
 	mux.Handle("GET /", http.FileServer(http.FS(static)))
 	return mux
+}
+
+func (s *Server) handleNodeTemplates(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{"templates": BuiltinNodeTemplates()})
 }
 
 func (s *Server) handleListBlueprints(w http.ResponseWriter, r *http.Request) {

@@ -70,6 +70,38 @@ func TestServerBlueprintAPI(t *testing.T) {
 	}
 }
 
+func TestServerNodeTemplatesAPI(t *testing.T) {
+	server := httptest.NewServer(NewServer(t.TempDir()).Handler())
+	defer server.Close()
+
+	resp, err := http.Get(server.URL + "/api/node-templates")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("templates status = %d", resp.StatusCode)
+	}
+	var payload struct {
+		Templates []NodeTemplate `json:"templates"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatal(err)
+	}
+	if len(payload.Templates) < 4 {
+		t.Fatalf("expected builtin templates, got %+v", payload.Templates)
+	}
+	seen := map[string]bool{}
+	for _, template := range payload.Templates {
+		seen[template.Type] = true
+	}
+	for _, want := range []string{"prompt", "skill", "toolset", "memory"} {
+		if !seen[want] {
+			t.Fatalf("missing template %q in %+v", want, payload.Templates)
+		}
+	}
+}
+
 func TestServerPutBlueprintValidatesRouteID(t *testing.T) {
 	workdir := t.TempDir()
 	server := httptest.NewServer(NewServer(workdir).Handler())
