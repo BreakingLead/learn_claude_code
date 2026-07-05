@@ -61,6 +61,57 @@ func TestRuntimeUsesBlueprintToolsetWhenEnabled(t *testing.T) {
 	}
 }
 
+func TestRuntimeExpandsCompositeToolsetWhenEnabled(t *testing.T) {
+	workdir := t.TempDir()
+	config := testConfig(workdir)
+	config.UseBlueprint = true
+	store := nodeeditor.NewStore(workdir)
+	if err := store.WriteComposite("safe-tools", nodeeditor.CompositeDefinition{
+		Version: nodeeditor.SchemaVersion,
+		ID:      "safe-tools",
+		Name:    "Safe Tools",
+		Outputs: []nodeeditor.CompositePortMapping{
+			{
+				Port:     nodeeditor.Port{ID: "toolset_out", Type: nodeeditor.PortTypeToolset, Label: "Toolset", Direction: nodeeditor.DirectionOutput},
+				Endpoint: nodeeditor.Endpoint{Node: "readonly-tools", Port: "toolset_out"},
+			},
+		},
+		Nodes: []nodeeditor.Node{
+			{
+				ID:      "readonly-tools",
+				Type:    nodeeditor.NodeTypeToolset,
+				Label:   "Readonly Tools",
+				Outputs: []nodeeditor.Port{{ID: "toolset_out", Type: nodeeditor.PortTypeToolset, Label: "Toolset", Direction: nodeeditor.DirectionOutput}},
+				Config:  map[string]any{"tools": []string{"read_file", "glob"}},
+			},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	blueprint := nodeeditor.DefaultBlueprint()
+	blueprint.Nodes = append(blueprint.Nodes, nodeeditor.Node{
+		ID:      "safe-tools-node",
+		Type:    nodeeditor.NodeTypeComposite,
+		Label:   "Safe Tools",
+		Outputs: []nodeeditor.Port{{ID: "toolset_out", Type: nodeeditor.PortTypeToolset, Label: "Toolset", Direction: nodeeditor.DirectionOutput}},
+		Config:  map[string]any{"definition": "safe-tools"},
+	})
+	blueprint.Edges = append(blueprint.Edges, nodeeditor.Edge{
+		ID:     "edge-safe-tools-node",
+		Source: nodeeditor.Endpoint{Node: "safe-tools-node", Port: "toolset_out"},
+		Target: nodeeditor.Endpoint{Node: "agent-main", Port: "toolset_in"},
+	})
+	if err := nodeeditor.WriteBlueprint(config.DefaultBlueprintPath, blueprint); err != nil {
+		t.Fatal(err)
+	}
+
+	rt := newAgentRuntime(config, nil, nil)
+	got := strings.Join(rt.mainAgentSpec().ToolNames, ",")
+	if !strings.Contains(got, "read_file") || !strings.Contains(got, "glob") {
+		t.Fatalf("expected composite tools in %s", got)
+	}
+}
+
 func TestRuntimeUsesBlueprintPromptOrderWhenEnabled(t *testing.T) {
 	workdir := t.TempDir()
 	writeFile(t, filepath.Join(workdir, "AGENTS.md"), "# Guide\nFollow project rules.")

@@ -29,6 +29,12 @@ type BlueprintSummary struct {
 	Path string `json:"path"`
 }
 
+type CompositeSummary struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	Path string `json:"path"`
+}
+
 func NewStore(workdir string) *Store {
 	return &Store{root: filepath.Join(workdir, ".agents", "blueprints")}
 }
@@ -37,12 +43,24 @@ func (s *Store) AgentDir() string {
 	return filepath.Join(s.root, "agents")
 }
 
+func (s *Store) CompositeDir() string {
+	return filepath.Join(s.root, "composites")
+}
+
 func (s *Store) AgentPath(id string) (string, error) {
 	id = safeID(id)
 	if id == "" {
 		return "", fmt.Errorf("blueprint id is required")
 	}
 	return filepath.Join(s.AgentDir(), id+".json"), nil
+}
+
+func (s *Store) CompositePath(id string) (string, error) {
+	id = safeID(id)
+	if id == "" {
+		return "", fmt.Errorf("composite id is required")
+	}
+	return filepath.Join(s.CompositeDir(), id+".json"), nil
 }
 
 func (s *Store) ListAgents() ([]BlueprintSummary, error) {
@@ -72,6 +90,33 @@ func (s *Store) ListAgents() ([]BlueprintSummary, error) {
 	return summaries, nil
 }
 
+func (s *Store) ListComposites() ([]CompositeSummary, error) {
+	entries, err := os.ReadDir(s.CompositeDir())
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var summaries []CompositeSummary
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
+			continue
+		}
+		path := filepath.Join(s.CompositeDir(), entry.Name())
+		definition, err := ReadComposite(path)
+		if err != nil {
+			continue
+		}
+		summaries = append(summaries, CompositeSummary{
+			ID:   definition.ID,
+			Name: definition.Name,
+			Path: path,
+		})
+	}
+	return summaries, nil
+}
+
 func (s *Store) ReadAgent(id string) (Blueprint, error) {
 	path, err := s.AgentPath(id)
 	if err != nil {
@@ -94,6 +139,28 @@ func (s *Store) WriteAgent(id string, blueprint Blueprint) error {
 	return WriteBlueprint(path, blueprint)
 }
 
+func (s *Store) LoadComposite(id string) (CompositeDefinition, error) {
+	path, err := s.CompositePath(id)
+	if err != nil {
+		return CompositeDefinition{}, err
+	}
+	return ReadComposite(path)
+}
+
+func (s *Store) WriteComposite(id string, definition CompositeDefinition) error {
+	path, err := s.CompositePath(id)
+	if err != nil {
+		return err
+	}
+	if safeID(definition.ID) != safeID(id) {
+		return fmt.Errorf("composite id %q does not match route id %q", definition.ID, id)
+	}
+	if err := ValidateComposite(definition); err != nil {
+		return err
+	}
+	return WriteComposite(path, definition)
+}
+
 func NewServer(workdir string) *Server {
 	return &Server{store: NewStore(workdir)}
 }
@@ -105,13 +172,27 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/blueprints/{id}", s.handleGetBlueprint)
 	mux.HandleFunc("PUT /api/blueprints/{id}", s.handlePutBlueprint)
 	mux.HandleFunc("POST /api/blueprints/{id}/validate", s.handleValidateBlueprint)
+	mux.HandleFunc("GET /api/composites", s.handleListComposites)
+	mux.HandleFunc("GET /api/composites/{id}", s.handleGetComposite)
+	mux.HandleFunc("PUT /api/composites/{id}", s.handlePutComposite)
 	static, _ := fs.Sub(webFS, "web")
 	mux.Handle("GET /", http.FileServer(http.FS(static)))
 	return mux
 }
 
 func (s *Server) handleNodeTemplates(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{"templates": BuiltinNodeTemplates()})
+	templates := BuiltinNodeTemplates()
+	composites, err := s.store.ListComposites()
+	if err == nil {
+		for _, composite := range composites {
+			definition, err := s.store.LoadComposite(composite.ID)
+			if err != nil {
+				continue
+			}
+			templates = append(templates, CompositeNodeTemplate(definition))
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"templates": templates})
 }
 
 func (s *Server) handleListBlueprints(w http.ResponseWriter, r *http.Request) {
@@ -151,16 +232,52 @@ func (s *Server) handleValidateBlueprint(w http.ResponseWriter, r *http.Request)
 		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": err.Error()})
 		return
 	}
-	if err := Validate(blueprint); err != nil {
-		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "error": err.Error()})
-		return
-	}
-	resolved, err := Resolve(blueprint)
+	expanded, err := ExpandComposites(blueprint, s.store)
 	if err != nil {
 		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "error": err.Error()})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "resolved": resolved})
+	if err := Validate(expanded); err != nil {
+		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "error": err.Error()})
+		return
+	}
+	resolved, err := Resolve(expanded)
+	if err != nil {
+		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "resolved": resolved, "expanded": expanded})
+}
+
+func (s *Server) handleListComposites(w http.ResponseWriter, r *http.Request) {
+	summaries, err := s.store.ListComposites()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"composites": summaries})
+}
+
+func (s *Server) handleGetComposite(w http.ResponseWriter, r *http.Request) {
+	definition, err := s.store.LoadComposite(r.PathValue("id"))
+	if err != nil {
+		writeError(w, http.StatusNotFound, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, definition)
+}
+
+func (s *Server) handlePutComposite(w http.ResponseWriter, r *http.Request) {
+	definition, err := decodeComposite(r.Body)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	if err := s.store.WriteComposite(r.PathValue("id"), definition); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 func decodeBlueprint(body io.Reader) (Blueprint, error) {
@@ -172,6 +289,17 @@ func decodeBlueprint(body io.Reader) (Blueprint, error) {
 		return Blueprint{}, err
 	}
 	return blueprint, nil
+}
+
+func decodeComposite(body io.Reader) (CompositeDefinition, error) {
+	defer io.Copy(io.Discard, body)
+	var definition CompositeDefinition
+	decoder := json.NewDecoder(body)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&definition); err != nil {
+		return CompositeDefinition{}, err
+	}
+	return definition, nil
 }
 
 func writeJSON(w http.ResponseWriter, status int, value any) {

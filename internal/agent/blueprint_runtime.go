@@ -27,13 +27,19 @@ func (rt *agentRuntime) loadRuntimeBlueprint() *runtimeBlueprint {
 		state.Error = err.Error()
 		return state
 	}
-	resolved, err := nodeeditor.Resolve(blueprint)
+	expanded, err := nodeeditor.ExpandComposites(blueprint, nodeeditor.NewStore(rt.config.Workdir))
 	if err != nil {
 		state.Graph = blueprint
 		state.Error = err.Error()
 		return state
 	}
-	state.Graph = blueprint
+	resolved, err := nodeeditor.Resolve(expanded)
+	if err != nil {
+		state.Graph = expanded
+		state.Error = err.Error()
+		return state
+	}
+	state.Graph = expanded
 	state.Resolved = resolved
 	return state
 }

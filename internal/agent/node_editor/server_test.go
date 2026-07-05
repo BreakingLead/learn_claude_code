@@ -71,7 +71,12 @@ func TestServerBlueprintAPI(t *testing.T) {
 }
 
 func TestServerNodeTemplatesAPI(t *testing.T) {
-	server := httptest.NewServer(NewServer(t.TempDir()).Handler())
+	workdir := t.TempDir()
+	store := NewStore(workdir)
+	if err := store.WriteComposite("safe-tools", safeToolsComposite()); err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(NewServer(workdir).Handler())
 	defer server.Close()
 
 	resp, err := http.Get(server.URL + "/api/node-templates")
@@ -99,6 +104,48 @@ func TestServerNodeTemplatesAPI(t *testing.T) {
 		if !seen[want] {
 			t.Fatalf("missing template %q in %+v", want, payload.Templates)
 		}
+	}
+	if !seen[NodeTypeComposite] {
+		t.Fatalf("missing composite template in %+v", payload.Templates)
+	}
+}
+
+func TestServerCompositeAPI(t *testing.T) {
+	workdir := t.TempDir()
+	server := httptest.NewServer(NewServer(workdir).Handler())
+	defer server.Close()
+
+	raw, err := json.Marshal(safeToolsComposite())
+	if err != nil {
+		t.Fatal(err)
+	}
+	req, err := http.NewRequest(http.MethodPut, server.URL+"/api/composites/safe-tools", bytes.NewReader(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("put composite status = %d", resp.StatusCode)
+	}
+
+	resp, err = http.Get(server.URL + "/api/composites")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var list struct {
+		Composites []CompositeSummary `json:"composites"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&list); err != nil {
+		t.Fatal(err)
+	}
+	if len(list.Composites) != 1 || list.Composites[0].ID != "safe-tools" {
+		t.Fatalf("unexpected composite list: %+v", list)
 	}
 }
 

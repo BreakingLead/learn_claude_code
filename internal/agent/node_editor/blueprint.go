@@ -199,6 +199,30 @@ func WriteBlueprint(path string, blueprint Blueprint) error {
 	return os.WriteFile(path, raw, 0o644)
 }
 
+func ReadComposite(path string) (CompositeDefinition, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return CompositeDefinition{}, err
+	}
+	var definition CompositeDefinition
+	if err := json.Unmarshal(raw, &definition); err != nil {
+		return CompositeDefinition{}, err
+	}
+	return definition, nil
+}
+
+func WriteComposite(path string, definition CompositeDefinition) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	raw, err := json.MarshalIndent(definition, "", "  ")
+	if err != nil {
+		return err
+	}
+	raw = append(raw, '\n')
+	return os.WriteFile(path, raw, 0o644)
+}
+
 func Validate(blueprint Blueprint) error {
 	if blueprint.Version != SchemaVersion {
 		return fmt.Errorf("unsupported blueprint version %d", blueprint.Version)

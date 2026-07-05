@@ -59,3 +59,30 @@ func BuiltinNodeTemplates() []NodeTemplate {
 		},
 	}
 }
+
+func CompositeNodeTemplate(definition CompositeDefinition) NodeTemplate {
+	label := definition.Name
+	if label == "" {
+		label = definition.ID
+	}
+	inputs := make([]Port, 0, len(definition.Inputs))
+	for _, mapping := range definition.Inputs {
+		inputs = append(inputs, mapping.Port)
+	}
+	outputs := make([]Port, 0, len(definition.Outputs))
+	for _, mapping := range definition.Outputs {
+		outputs = append(outputs, mapping.Port)
+	}
+	return NodeTemplate{
+		Type:        NodeTypeComposite,
+		Label:       label,
+		Description: "Reusable composite node group.",
+		Node: Node{
+			Type:    NodeTypeComposite,
+			Label:   label,
+			Inputs:  inputs,
+			Outputs: outputs,
+			Config:  map[string]any{"definition": definition.ID},
+		},
+	}
+}
