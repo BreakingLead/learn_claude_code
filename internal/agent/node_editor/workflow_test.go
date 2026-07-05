@@ -31,6 +31,26 @@ func TestDefaultWorkflowValidatesAndOrders(t *testing.T) {
 	}
 }
 
+func TestWorkflowExecutionPlanShowsDataFlow(t *testing.T) {
+	steps, err := WorkflowExecutionPlan(DefaultWorkflow())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(steps) != len(DefaultWorkflow().Nodes) {
+		t.Fatalf("unexpected plan length: %+v", steps)
+	}
+	summary := workflowStepByNodeID(steps, "summary")
+	if summary.NodeID != "summary" {
+		t.Fatalf("missing summary step: %+v", steps)
+	}
+	if !containsNodeID(summary.InputsFrom, "developer") || !containsNodeID(summary.InputsFrom, "reviewer") {
+		t.Fatalf("unexpected summary inputs: %+v", summary)
+	}
+	if !containsNodeID(summary.OutputsTo, "output") {
+		t.Fatalf("unexpected summary outputs: %+v", summary)
+	}
+}
+
 func TestEnsureDefaultWorkflowWritesOnce(t *testing.T) {
 	path := filepath.Join(t.TempDir(), ".agents", "blueprints", "workflows", "review-pipeline.json")
 	created, err := EnsureDefaultWorkflow(path)
@@ -161,4 +181,13 @@ func indexOf(values []string, target string) int {
 		}
 	}
 	return -1
+}
+
+func workflowStepByNodeID(steps []WorkflowExecutionStep, nodeID string) WorkflowExecutionStep {
+	for _, step := range steps {
+		if step.NodeID == nodeID {
+			return step
+		}
+	}
+	return WorkflowExecutionStep{}
 }

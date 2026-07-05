@@ -76,6 +76,7 @@ type WorkflowValidationResponse struct {
 	OK     bool                      `json:"ok"`
 	Error  string                    `json:"error,omitempty"`
 	Order  []string                  `json:"order,omitempty"`
+	Steps  []WorkflowExecutionStep   `json:"steps,omitempty"`
 	Agents []WorkflowAgentResolution `json:"agents,omitempty"`
 }
 
@@ -408,14 +409,18 @@ func (s *Store) WriteWorkflow(id string, workflow WorkflowDefinition) error {
 }
 
 func (s *Store) ValidateWorkflow(workflow WorkflowDefinition) WorkflowValidationResponse {
-	order, err := WorkflowExecutionOrder(workflow)
+	steps, err := WorkflowExecutionPlan(workflow)
 	if err != nil {
 		return WorkflowValidationResponse{OK: false, Error: err.Error()}
 	}
 	if err := s.ValidateWorkflowAgentReferences(workflow); err != nil {
 		return WorkflowValidationResponse{OK: false, Error: err.Error()}
 	}
-	return WorkflowValidationResponse{OK: true, Order: order, Agents: s.ResolveWorkflowAgents(workflow)}
+	order := make([]string, 0, len(steps))
+	for _, step := range steps {
+		order = append(order, step.NodeID)
+	}
+	return WorkflowValidationResponse{OK: true, Order: order, Steps: steps, Agents: s.ResolveWorkflowAgents(workflow)}
 }
 
 func (s *Store) ValidateWorkflowAgentReferences(workflow WorkflowDefinition) error {

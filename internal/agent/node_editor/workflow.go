@@ -36,6 +36,15 @@ type WorkflowNode struct {
 	Config         map[string]any `json:"config,omitempty"`
 }
 
+type WorkflowExecutionStep struct {
+	NodeID         string   `json:"node_id"`
+	Type           string   `json:"type"`
+	Label          string   `json:"label"`
+	AgentBlueprint string   `json:"agent_blueprint,omitempty"`
+	InputsFrom     []string `json:"inputs_from,omitempty"`
+	OutputsTo      []string `json:"outputs_to,omitempty"`
+}
+
 func DefaultWorkflow() WorkflowDefinition {
 	return WorkflowDefinition{
 		Version: SchemaVersion,
@@ -241,6 +250,36 @@ func WorkflowExecutionOrder(workflow WorkflowDefinition) ([]string, error) {
 		return nil, fmt.Errorf("workflow contains a cycle")
 	}
 	return order, nil
+}
+
+func WorkflowExecutionPlan(workflow WorkflowDefinition) ([]WorkflowExecutionStep, error) {
+	order, err := WorkflowExecutionOrder(workflow)
+	if err != nil {
+		return nil, err
+	}
+	nodes := map[string]WorkflowNode{}
+	inputs := map[string][]string{}
+	outputs := map[string][]string{}
+	for _, node := range workflow.Nodes {
+		nodes[node.ID] = node
+	}
+	for _, edge := range workflow.Edges {
+		inputs[edge.Target.Node] = append(inputs[edge.Target.Node], edge.Source.Node)
+		outputs[edge.Source.Node] = append(outputs[edge.Source.Node], edge.Target.Node)
+	}
+	steps := make([]WorkflowExecutionStep, 0, len(order))
+	for _, nodeID := range order {
+		node := nodes[nodeID]
+		steps = append(steps, WorkflowExecutionStep{
+			NodeID:         node.ID,
+			Type:           node.Type,
+			Label:          node.Label,
+			AgentBlueprint: node.AgentBlueprint,
+			InputsFrom:     sortedUniqueStrings(inputs[node.ID]),
+			OutputsTo:      sortedUniqueStrings(outputs[node.ID]),
+		})
+	}
+	return steps, nil
 }
 
 func validateWorkflowNode(node WorkflowNode) error {

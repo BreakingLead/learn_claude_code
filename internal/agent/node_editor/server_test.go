@@ -328,6 +328,9 @@ func TestServerWorkflowAPI(t *testing.T) {
 	if !validation.OK || len(validation.Order) != len(workflow.Nodes) {
 		t.Fatalf("unexpected workflow validation: %+v", validation)
 	}
+	if len(validation.Steps) != len(workflow.Nodes) || validation.Steps[1].NodeID == "" {
+		t.Fatalf("unexpected workflow steps: %+v", validation.Steps)
+	}
 	if len(validation.Agents) != 3 || validation.Agents[0].BlueprintID != "default" {
 		t.Fatalf("unexpected workflow agent resolutions: %+v", validation.Agents)
 	}

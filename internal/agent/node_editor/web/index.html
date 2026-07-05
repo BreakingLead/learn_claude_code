@@ -1239,10 +1239,31 @@
             ]);
           }
           const order = workflowValidationResult.order || [];
+          const steps = workflowValidationResult.steps || [];
           const agents = workflowValidationResult.agents || [];
           return React.createElement("div", { className: "validation", key: "workflow-validation" }, [
             React.createElement("div", { className: "validation-title", key: "title" }, "Workflow valid"),
             React.createElement("div", { className: "muted", key: "order" }, `order: ${order.join(" -> ") || "(empty)"}`),
+            steps.length > 0
+              ? React.createElement("div", { className: "field", key: "steps" }, [
+                  React.createElement("label", { key: "label" }, "Execution plan"),
+                  ...steps.map((step, index) => React.createElement("div", { className: "validation", key: step.node_id }, [
+                    React.createElement("div", { className: "validation-title", key: "title" },
+                      `${index + 1}. ${step.label || step.node_id}`
+                    ),
+                    React.createElement("div", { className: "muted", key: "type" }, `type: ${step.type}`),
+                    step.agent_blueprint
+                      ? React.createElement("div", { className: "muted", key: "agent" }, `agent: ${step.agent_blueprint}`)
+                      : null,
+                    React.createElement("div", { className: "muted", key: "inputs" },
+                      `from: ${(step.inputs_from || []).join(", ") || "(start)"}`
+                    ),
+                    React.createElement("div", { className: "muted", key: "outputs" },
+                      `to: ${(step.outputs_to || []).join(", ") || "(end)"}`
+                    ),
+                  ])),
+                ])
+              : null,
             agents.length > 0
               ? React.createElement("div", { className: "field", key: "agents" }, [
                   React.createElement("label", { key: "label" }, "Agent bindings"),
