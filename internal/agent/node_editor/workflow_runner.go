@@ -24,21 +24,22 @@ type WorkflowPlanRunRequest struct {
 }
 
 type WorkflowPlanRun struct {
-	ID            string                  `json:"id,omitempty"`
-	WorkflowID    string                  `json:"workflow_id"`
-	Name          string                  `json:"name"`
-	CreatedAt     string                  `json:"created_at,omitempty"`
-	ExecutionMode string                  `json:"execution_mode,omitempty"`
-	TimeoutMS     int                     `json:"timeout_ms,omitempty"`
-	Status        string                  `json:"status,omitempty"`
-	Error         string                  `json:"error,omitempty"`
-	SourceHash    string                  `json:"source_hash"`
-	CurrentHash   string                  `json:"current_hash,omitempty"`
-	Stale         bool                    `json:"stale"`
-	Input         string                  `json:"input"`
-	Steps         []WorkflowPlanRunStep   `json:"steps,omitempty"`
-	Outputs       []WorkflowPlanRunOutput `json:"outputs,omitempty"`
-	Diagnostics   []string                `json:"diagnostics,omitempty"`
+	ID              string                  `json:"id,omitempty"`
+	WorkflowID      string                  `json:"workflow_id"`
+	Name            string                  `json:"name"`
+	CreatedAt       string                  `json:"created_at,omitempty"`
+	ExecutionMode   string                  `json:"execution_mode,omitempty"`
+	ExternalCommand []string                `json:"external_command,omitempty"`
+	TimeoutMS       int                     `json:"timeout_ms,omitempty"`
+	Status          string                  `json:"status,omitempty"`
+	Error           string                  `json:"error,omitempty"`
+	SourceHash      string                  `json:"source_hash"`
+	CurrentHash     string                  `json:"current_hash,omitempty"`
+	Stale           bool                    `json:"stale"`
+	Input           string                  `json:"input"`
+	Steps           []WorkflowPlanRunStep   `json:"steps,omitempty"`
+	Outputs         []WorkflowPlanRunOutput `json:"outputs,omitempty"`
+	Diagnostics     []string                `json:"diagnostics,omitempty"`
 }
 
 type WorkflowPlanRunStep struct {
@@ -142,6 +143,9 @@ func (s *Store) RunWorkflowPlan(ctx context.Context, id string, request Workflow
 	}
 	run, err := executor.Execute(ctx, plan, request.Input)
 	run.ExecutionMode = mode
+	if mode == "external_command" {
+		run.ExternalCommand = append([]string(nil), request.ExternalCommand...)
+	}
 	currentHash, stale := s.currentWorkflowHash(plan.WorkflowID, plan.SourceHash)
 	run.CurrentHash = currentHash
 	run.Stale = stale

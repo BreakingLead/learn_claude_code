@@ -792,7 +792,7 @@ func TestServerRunWorkflowPlanPersistsFailures(t *testing.T) {
 	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
 		t.Fatal(err)
 	}
-	if payload.OK || payload.Run.ID == "" || payload.Run.Status != WorkflowRunStatusFailed {
+	if payload.OK || payload.Run.ID == "" || payload.Run.Status != WorkflowRunStatusFailed || strings.Join(payload.Run.ExternalCommand, " ") != scriptPath {
 		t.Fatalf("expected failed saved run response: %+v", payload)
 	}
 
@@ -800,7 +800,7 @@ func TestServerRunWorkflowPlanPersistsFailures(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(runs) != 1 || runs[0].ID != payload.Run.ID || runs[0].Status != WorkflowRunStatusFailed {
+	if len(runs) != 1 || runs[0].ID != payload.Run.ID || runs[0].Status != WorkflowRunStatusFailed || strings.Join(runs[0].ExternalCommand, " ") != scriptPath {
 		t.Fatalf("expected failed run in history: %+v", runs)
 	}
 }

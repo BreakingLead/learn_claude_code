@@ -55,17 +55,18 @@ type WorkflowPlanSummary struct {
 }
 
 type WorkflowRunSummary struct {
-	ID            string `json:"id"`
-	WorkflowID    string `json:"workflow_id"`
-	Name          string `json:"name"`
-	Path          string `json:"path"`
-	CreatedAt     string `json:"created_at"`
-	ExecutionMode string `json:"execution_mode,omitempty"`
-	TimeoutMS     int    `json:"timeout_ms,omitempty"`
-	Status        string `json:"status,omitempty"`
-	Error         string `json:"error,omitempty"`
-	Stale         bool   `json:"stale"`
-	Output        string `json:"output,omitempty"`
+	ID              string   `json:"id"`
+	WorkflowID      string   `json:"workflow_id"`
+	Name            string   `json:"name"`
+	Path            string   `json:"path"`
+	CreatedAt       string   `json:"created_at"`
+	ExecutionMode   string   `json:"execution_mode,omitempty"`
+	ExternalCommand []string `json:"external_command,omitempty"`
+	TimeoutMS       int      `json:"timeout_ms,omitempty"`
+	Status          string   `json:"status,omitempty"`
+	Error           string   `json:"error,omitempty"`
+	Stale           bool     `json:"stale"`
+	Output          string   `json:"output,omitempty"`
 }
 
 type CreateBlueprintRequest struct {
@@ -407,17 +408,18 @@ func (s *Store) ListWorkflowRuns(workflowID string) ([]WorkflowRunSummary, error
 			continue
 		}
 		summaries = append(summaries, WorkflowRunSummary{
-			ID:            run.ID,
-			WorkflowID:    run.WorkflowID,
-			Name:          run.Name,
-			Path:          path,
-			CreatedAt:     run.CreatedAt,
-			ExecutionMode: run.ExecutionMode,
-			TimeoutMS:     run.TimeoutMS,
-			Status:        run.Status,
-			Error:         run.Error,
-			Stale:         run.Stale,
-			Output:        workflowRunSummaryOutput(run),
+			ID:              run.ID,
+			WorkflowID:      run.WorkflowID,
+			Name:            run.Name,
+			Path:            path,
+			CreatedAt:       run.CreatedAt,
+			ExecutionMode:   run.ExecutionMode,
+			ExternalCommand: append([]string(nil), run.ExternalCommand...),
+			TimeoutMS:       run.TimeoutMS,
+			Status:          run.Status,
+			Error:           run.Error,
+			Stale:           run.Stale,
+			Output:          workflowRunSummaryOutput(run),
 		})
 	}
 	sort.Slice(summaries, func(i, j int) bool {

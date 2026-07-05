@@ -1674,6 +1674,11 @@
                 )
               : null,
             React.createElement("div", { className: "muted", key: "mode" }, `mode: ${run.execution_mode || "dry_run"}`),
+            (run.external_command || []).length > 0
+              ? React.createElement("div", { className: "muted", key: "external-command" },
+                  `external command: ${(run.external_command || []).join(" ")}`
+                )
+              : null,
             React.createElement("div", { className: "muted", key: "timeout" }, `timeout: ${run.timeout_ms || 30000}ms`),
             React.createElement("div", { className: "muted", key: "input" }, `input: ${run.input || "(empty)"}`),
             run.stale
@@ -2148,7 +2153,11 @@
                       }, [
                         React.createElement("option", { key: "empty", value: "" }, workflowRuns.length ? "Select run" : "No runs"),
                         ...workflowRuns.map((run) =>
-                          React.createElement("option", { key: run.id, value: run.id },
+                          React.createElement("option", {
+                            key: run.id,
+                            value: run.id,
+                            title: (run.external_command || []).join(" "),
+                          },
                             `${run.created_at || run.id} [${run.execution_mode || "dry_run"}:${run.status || "completed"}]${run.stale ? " (stale)" : ""}`
                           )
                         ),
