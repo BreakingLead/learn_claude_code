@@ -584,6 +584,7 @@
         const [workflowSource, setWorkflowSource] = useState("");
         const [editorMode, setEditorMode] = useState("blueprint");
         const [validationResult, setValidationResult] = useState(null);
+        const [workflowValidationResult, setWorkflowValidationResult] = useState(null);
         const selectedWorkflowNode = (() => {
           if (editorMode !== "workflow" || !selectedNodeId || !workflowSource.trim()) return null;
           try {
@@ -614,6 +615,7 @@
           setNodes(toFlowNodes(next));
           setEdges(toFlowEdges(next));
           setValidationResult(null);
+          setWorkflowValidationResult(null);
           if (message) setStatus(message);
         }, [setEdges, setNodes]);
 
@@ -860,6 +862,7 @@
 
         const updateWorkflowSource = useCallback((raw) => {
           setWorkflowSource(raw);
+          setWorkflowValidationResult(null);
           try {
             const next = JSON.parse(raw);
             setNodes(toFlowNodes(next));
@@ -1214,6 +1217,7 @@
               body: JSON.stringify(next),
             });
             const result = await response.json();
+            setWorkflowValidationResult(result);
             if (!response.ok || !result.ok) {
               setStatus(`workflow invalid: ${result.error || response.statusText}`);
               return;
@@ -1222,6 +1226,35 @@
           } catch (error) {
             setStatus(`workflow invalid: ${error.message}`);
           }
+        };
+
+        const renderWorkflowValidationResult = () => {
+          if (!workflowValidationResult) return null;
+          if (!workflowValidationResult.ok) {
+            return React.createElement("div", { className: "validation", key: "workflow-validation" }, [
+              React.createElement("div", { className: "validation-title", key: "title" }, "Workflow Validation"),
+              React.createElement("div", { className: "diagnostics", key: "error" },
+                workflowValidationResult.error || "Workflow is invalid."
+              ),
+            ]);
+          }
+          const order = workflowValidationResult.order || [];
+          const agents = workflowValidationResult.agents || [];
+          return React.createElement("div", { className: "validation", key: "workflow-validation" }, [
+            React.createElement("div", { className: "validation-title", key: "title" }, "Workflow valid"),
+            React.createElement("div", { className: "muted", key: "order" }, `order: ${order.join(" -> ") || "(empty)"}`),
+            agents.length > 0
+              ? React.createElement("div", { className: "field", key: "agents" }, [
+                  React.createElement("label", { key: "label" }, "Agent bindings"),
+                  ...agents.map((agent) => React.createElement("div", { className: "validation", key: agent.node_id }, [
+                    React.createElement("div", { className: "validation-title", key: "title" }, agent.label || agent.node_id),
+                    React.createElement("div", { className: "muted", key: "blueprint" },
+                      `${agent.node_id} -> ${agent.blueprint_name ? `${agent.blueprint_name} (${agent.blueprint_id})` : agent.blueprint_id}`
+                    ),
+                  ])),
+                ])
+              : React.createElement("div", { className: "muted", key: "no-agents" }, "No workflow agents."),
+          ]);
         };
 
         const saveWorkflow = async () => {
@@ -1550,6 +1583,7 @@
                   ])
                 : editorMode === "workflow"
                 ? React.createElement("div", { className: "inspector", key: "workflow-inspector" }, [
+                    renderWorkflowValidationResult(),
                     React.createElement("div", { className: "muted", key: "help" }, activeWorkflowId
                       ? "Edit the multi-agent workflow DAG JSON. Validation checks typed message ports and cycle-free execution order."
                       : "No workflow selected."),

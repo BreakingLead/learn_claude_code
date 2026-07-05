@@ -73,9 +73,17 @@ type BlueprintValidationResponse struct {
 }
 
 type WorkflowValidationResponse struct {
-	OK    bool     `json:"ok"`
-	Error string   `json:"error,omitempty"`
-	Order []string `json:"order,omitempty"`
+	OK     bool                      `json:"ok"`
+	Error  string                    `json:"error,omitempty"`
+	Order  []string                  `json:"order,omitempty"`
+	Agents []WorkflowAgentResolution `json:"agents,omitempty"`
+}
+
+type WorkflowAgentResolution struct {
+	NodeID        string `json:"node_id"`
+	Label         string `json:"label"`
+	BlueprintID   string `json:"blueprint_id"`
+	BlueprintName string `json:"blueprint_name,omitempty"`
 }
 
 func NewStore(workdir string) *Store {
@@ -407,7 +415,7 @@ func (s *Store) ValidateWorkflow(workflow WorkflowDefinition) WorkflowValidation
 	if err := s.ValidateWorkflowAgentReferences(workflow); err != nil {
 		return WorkflowValidationResponse{OK: false, Error: err.Error()}
 	}
-	return WorkflowValidationResponse{OK: true, Order: order}
+	return WorkflowValidationResponse{OK: true, Order: order, Agents: s.ResolveWorkflowAgents(workflow)}
 }
 
 func (s *Store) ValidateWorkflowAgentReferences(workflow WorkflowDefinition) error {
@@ -431,6 +439,26 @@ func (s *Store) ValidateWorkflowAgentReferences(workflow WorkflowDefinition) err
 		}
 	}
 	return nil
+}
+
+func (s *Store) ResolveWorkflowAgents(workflow WorkflowDefinition) []WorkflowAgentResolution {
+	var agents []WorkflowAgentResolution
+	for _, node := range workflow.Nodes {
+		if node.Type != WorkflowNodeTypeAgent {
+			continue
+		}
+		id := safeID(node.AgentBlueprint)
+		resolution := WorkflowAgentResolution{
+			NodeID:      node.ID,
+			Label:       node.Label,
+			BlueprintID: id,
+		}
+		if blueprint, err := s.ReadAgent(id); err == nil {
+			resolution.BlueprintName = blueprint.Name
+		}
+		agents = append(agents, resolution)
+	}
+	return agents
 }
 
 func NewServer(workdir string) *Server {
