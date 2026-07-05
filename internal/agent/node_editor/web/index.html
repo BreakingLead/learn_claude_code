@@ -1,0 +1,353 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Bee Agent Builder</title>
+    <link rel="stylesheet" href="https://esm.sh/@xyflow/react@12.3.6/dist/style.css" />
+    <style>
+      :root {
+        color-scheme: dark;
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        background: #111318;
+        color: #e6e9ef;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        overflow: hidden;
+      }
+
+      .app {
+        display: grid;
+        grid-template-rows: 48px 1fr;
+        height: 100vh;
+      }
+
+      .topbar {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        border-bottom: 1px solid #2a2f3a;
+        padding: 0 16px;
+        background: #171a21;
+      }
+
+      .brand {
+        font-weight: 700;
+      }
+
+      .status {
+        color: #aab2c0;
+        font-size: 13px;
+      }
+
+      .layout {
+        display: grid;
+        grid-template-columns: minmax(420px, 1fr) minmax(380px, 42vw);
+        min-height: 0;
+      }
+
+      .graph {
+        min-height: 0;
+        border-right: 1px solid #2a2f3a;
+      }
+
+      .panel {
+        display: grid;
+        grid-template-rows: 44px 1fr;
+        min-width: 0;
+        min-height: 0;
+        background: #111318;
+      }
+
+      .panelbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        border-bottom: 1px solid #2a2f3a;
+        padding: 0 12px;
+      }
+
+      .actions {
+        display: flex;
+        gap: 8px;
+      }
+
+      button {
+        border: 1px solid #394151;
+        border-radius: 6px;
+        background: #222733;
+        color: #f5f7fb;
+        cursor: pointer;
+        font: inherit;
+        font-size: 13px;
+        height: 30px;
+        padding: 0 10px;
+      }
+
+      button:hover {
+        background: #2b3240;
+      }
+
+      textarea {
+        width: 100%;
+        height: 100%;
+        resize: none;
+        border: 0;
+        outline: none;
+        padding: 14px;
+        background: #0d0f14;
+        color: #e6e9ef;
+        font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+        font-size: 12px;
+        line-height: 1.5;
+      }
+
+      .node {
+        min-width: 170px;
+        border: 1px solid #3b4352;
+        border-radius: 8px;
+        background: #1d222c;
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.24);
+        overflow: hidden;
+      }
+
+      .node-title {
+        border-bottom: 1px solid #303746;
+        padding: 8px 10px;
+        font-weight: 700;
+        font-size: 13px;
+      }
+
+      .node-type {
+        color: #aab2c0;
+        font-size: 11px;
+        margin-top: 2px;
+      }
+
+      .ports {
+        display: grid;
+        gap: 6px;
+        padding: 8px 10px;
+      }
+
+      .port {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        color: #cbd2dd;
+        font-size: 12px;
+      }
+
+      .dot {
+        width: 9px;
+        height: 9px;
+        border-radius: 999px;
+        background: var(--port-color, #7f8da3);
+      }
+
+      .react-flow__handle {
+        width: 9px;
+        height: 9px;
+        border: 1px solid #0d0f14;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module">
+      import React, { useCallback, useEffect, useMemo, useState } from "https://esm.sh/react@18.3.1";
+      import { createRoot } from "https://esm.sh/react-dom@18.3.1/client";
+      import ReactFlow, {
+        Background,
+        Controls,
+        Handle,
+        MarkerType,
+        Position,
+      } from "https://esm.sh/@xyflow/react@12.3.6?deps=react@18.3.1,react-dom@18.3.1";
+
+      const portColors = {
+        prompt: "#b57cff",
+        toolset: "#5ba8ff",
+        memory: "#61d394",
+        output: "#aeb7c6",
+      };
+
+      function BlueprintNode({ data }) {
+        const inputs = data.inputs || [];
+        const outputs = data.outputs || [];
+        return React.createElement("div", { className: "node" }, [
+          React.createElement("div", { className: "node-title", key: "title" }, [
+            data.label,
+            React.createElement("div", { className: "node-type", key: "type" }, data.type),
+          ]),
+          React.createElement("div", { className: "ports", key: "ports" }, [
+            ...inputs.map((port, index) =>
+              React.createElement("div", { className: "port", key: `in-${port.id}` }, [
+                React.createElement(Handle, {
+                  key: "handle",
+                  type: "target",
+                  id: port.id,
+                  position: Position.Left,
+                  style: { top: 54 + index * 22, background: portColors[port.type] || "#7f8da3" },
+                }),
+                React.createElement("span", {
+                  className: "dot",
+                  key: "dot",
+                  style: { "--port-color": portColors[port.type] || "#7f8da3" },
+                }),
+                React.createElement("span", { key: "label" }, port.label || port.id),
+              ])
+            ),
+            ...outputs.map((port, index) =>
+              React.createElement("div", { className: "port", key: `out-${port.id}` }, [
+                React.createElement(Handle, {
+                  key: "handle",
+                  type: "source",
+                  id: port.id,
+                  position: Position.Right,
+                  style: { top: 54 + (inputs.length + index) * 22, background: portColors[port.type] || "#7f8da3" },
+                }),
+                React.createElement("span", {
+                  className: "dot",
+                  key: "dot",
+                  style: { "--port-color": portColors[port.type] || "#7f8da3" },
+                }),
+                React.createElement("span", { key: "label" }, port.label || port.id),
+              ])
+            ),
+          ]),
+        ]);
+      }
+
+      const nodeTypes = { blueprint: BlueprintNode };
+
+      function toFlowNodes(blueprint) {
+        return (blueprint.nodes || []).map((node) => ({
+          id: node.id,
+          type: "blueprint",
+          position: node.position || { x: 0, y: 0 },
+          data: {
+            label: node.label || node.id,
+            type: node.type,
+            inputs: node.inputs,
+            outputs: node.outputs,
+          },
+        }));
+      }
+
+      function toFlowEdges(blueprint) {
+        return (blueprint.edges || []).map((edge) => ({
+          id: edge.id,
+          source: edge.source.node,
+          sourceHandle: edge.source.port,
+          target: edge.target.node,
+          targetHandle: edge.target.port,
+          markerEnd: { type: MarkerType.ArrowClosed },
+          style: { stroke: "#7f8da3" },
+        }));
+      }
+
+      function App() {
+        const [blueprint, setBlueprint] = useState(null);
+        const [source, setSource] = useState("");
+        const [status, setStatus] = useState("loading default blueprint");
+
+        const load = useCallback(async () => {
+          const response = await fetch("/api/blueprints/default");
+          const data = await response.json();
+          setBlueprint(data);
+          setSource(JSON.stringify(data, null, 2));
+          setStatus("loaded default blueprint");
+        }, []);
+
+        useEffect(() => {
+          load().catch((error) => setStatus(`load failed: ${error.message}`));
+        }, [load]);
+
+        const nodes = useMemo(() => (blueprint ? toFlowNodes(blueprint) : []), [blueprint]);
+        const edges = useMemo(() => (blueprint ? toFlowEdges(blueprint) : []), [blueprint]);
+
+        const parseSource = () => {
+          const next = JSON.parse(source);
+          setBlueprint(next);
+          return next;
+        };
+
+        const validate = async () => {
+          try {
+            const next = parseSource();
+            const response = await fetch(`/api/blueprints/${next.id}/validate`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(next),
+            });
+            const result = await response.json();
+            setStatus(result.ok ? `valid: ${result.resolved.id}` : `invalid: ${result.error}`);
+          } catch (error) {
+            setStatus(`invalid: ${error.message}`);
+          }
+        };
+
+        const save = async () => {
+          try {
+            const next = parseSource();
+            const response = await fetch(`/api/blueprints/${next.id}`, {
+              method: "PUT",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(next),
+            });
+            const result = await response.json();
+            setStatus(result.ok ? "saved" : `save failed: ${result.error}`);
+          } catch (error) {
+            setStatus(`save failed: ${error.message}`);
+          }
+        };
+
+        return React.createElement("div", { className: "app" }, [
+          React.createElement("div", { className: "topbar", key: "topbar" }, [
+            React.createElement("div", { className: "brand", key: "brand" }, "Bee Agent Builder"),
+            React.createElement("div", { className: "status", key: "status" }, status),
+          ]),
+          React.createElement("div", { className: "layout", key: "layout" }, [
+            React.createElement("div", { className: "graph", key: "graph" },
+              React.createElement(ReactFlow, {
+                nodes,
+                edges,
+                nodeTypes,
+                fitView: true,
+              }, [
+                React.createElement(Background, { key: "background", color: "#303746" }),
+                React.createElement(Controls, { key: "controls" }),
+              ])
+            ),
+            React.createElement("div", { className: "panel", key: "panel" }, [
+              React.createElement("div", { className: "panelbar", key: "panelbar" }, [
+                React.createElement("span", { key: "label" }, "Blueprint JSON"),
+                React.createElement("div", { className: "actions", key: "actions" }, [
+                  React.createElement("button", { key: "validate", onClick: validate }, "Validate"),
+                  React.createElement("button", { key: "save", onClick: save }, "Save"),
+                ]),
+              ]),
+              React.createElement("textarea", {
+                key: "editor",
+                value: source,
+                spellCheck: "false",
+                onChange: (event) => setSource(event.target.value),
+              }),
+            ]),
+          ]),
+        ]);
+      }
+
+      createRoot(document.getElementById("root")).render(React.createElement(App));
+    </script>
+  </body>
+</html>

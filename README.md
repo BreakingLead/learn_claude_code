@@ -103,6 +103,18 @@ TUI 内也可以切换：
 
 `tools` 是允许列表；未设置时继承完整工具集。`disable_tools` 会从当前工具集中移除指定工具。也可以用 `BEE_AGENT_MODE=plan` 设置启动默认模式。
 
+## Agent Builder
+
+Agent Builder 使用 JSON Blueprint 描述节点、typed ports 和 edges。默认配置位于 `.agents/blueprints/agents/default.json`，首次运行缺失时会自动生成。
+
+启动 Web UI：
+
+```bash
+BEE_AGENT_NODE_EDITOR=1 go run ./cmd/bee-agent
+```
+
+默认地址是 `http://127.0.0.1:8787`，可以用 `BEE_AGENT_NODE_EDITOR_ADDR=:8787` 修改。当前 Web UI 支持查看默认图、编辑 JSON、保存和校验；后续会继续接入完整节点编辑交互。
+
 ## 消息平台中间层
 
 `messaging` 模块把外部平台 payload 统一为 `UnifiedMessage` 风格的数据：`platform`、`chat_id`、`sender_id`、`sender_name`、`text`、`message_type`、`timestamp`、`metadata`。当前内置 adapter：
