@@ -653,10 +653,16 @@
         }, [selectedNodeId]);
 
         const validConnection = useCallback((connection) => {
-          if (editorMode === "workflow") return false;
+          if (editorMode === "workflow") {
+            try {
+              return connectionError(JSON.parse(workflowSource), edges, connection) === "";
+            } catch {
+              return false;
+            }
+          }
           if (!blueprint) return false;
           return connectionError(blueprint, edges, connection) === "";
-        }, [blueprint, edges, editorMode]);
+        }, [blueprint, edges, editorMode, workflowSource]);
 
         const parseSource = () => {
           const next = JSON.parse(source);
@@ -677,7 +683,21 @@
 
         const connect = useCallback((connection) => {
           if (editorMode === "workflow") {
-            setStatus("workflow graph connections are edited in JSON for now");
+            try {
+              const workflow = JSON.parse(workflowSource);
+              const error = connectionError(workflow, edges, connection);
+              if (error) {
+                setStatus(`workflow connection rejected: ${error}`);
+                return;
+              }
+              const edge = edgeFromConnection(connection);
+              updateWorkflowDocument({
+                ...workflow,
+                edges: [...(workflow.edges || []), edge],
+              }, "workflow connected");
+            } catch (error) {
+              setStatus(`workflow connection failed: ${error.message}`);
+            }
             return;
           }
           if (!blueprint) return;
@@ -693,7 +713,7 @@
           });
           updateDocument(next);
           setStatus("connected");
-        }, [blueprint, edges, editorMode, updateDocument]);
+        }, [blueprint, edges, editorMode, updateDocument, updateWorkflowDocument, workflowSource]);
 
         const updateNodePosition = useCallback((_, node) => {
           if (editorMode === "workflow") {
@@ -728,7 +748,16 @@
 
         const deleteEdges = useCallback((deleted) => {
           if (editorMode === "workflow") {
-            setStatus("workflow graph edges are edited in JSON for now");
+            try {
+              const workflow = JSON.parse(workflowSource);
+              const deletedIDs = new Set(deleted.map((edge) => edge.id));
+              updateWorkflowDocument({
+                ...workflow,
+                edges: (workflow.edges || []).filter((edge) => !deletedIDs.has(edge.id)),
+              }, "workflow edge removed");
+            } catch (error) {
+              setStatus(`workflow edge remove failed: ${error.message}`);
+            }
             return;
           }
           if (!blueprint || deleted.length === 0) return;
@@ -740,7 +769,7 @@
           setBlueprint(next);
           setSource(JSON.stringify(next, null, 2));
           setStatus("edge removed");
-        }, [blueprint, editorMode]);
+        }, [blueprint, editorMode, updateWorkflowDocument, workflowSource]);
 
         const selectNode = useCallback((_, node) => {
           setSelectedNodeId(node.id);
