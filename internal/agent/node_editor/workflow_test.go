@@ -73,6 +73,27 @@ func TestSimulateWorkflowShowsMessageHandoff(t *testing.T) {
 	}
 }
 
+func TestWorkflowDiagnosticsWarnAboutDisconnectedNodes(t *testing.T) {
+	if diagnostics := WorkflowDiagnostics(DefaultWorkflow()); len(diagnostics) != 0 {
+		t.Fatalf("expected default workflow without diagnostics, got %+v", diagnostics)
+	}
+
+	workflow := DefaultWorkflow()
+	workflow.Edges = workflow.Edges[:1]
+	diagnostics := WorkflowDiagnostics(workflow)
+	got := strings.Join(diagnostics, "\n")
+	for _, want := range []string{
+		`agent node "reviewer" has no incoming message`,
+		`agent node "developer" has no outgoing message`,
+		`output node "output" has no incoming message`,
+		`node "output" is not reachable from a workflow input`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("missing diagnostic %q in %+v", want, diagnostics)
+		}
+	}
+}
+
 func TestEnsureDefaultWorkflowWritesOnce(t *testing.T) {
 	path := filepath.Join(t.TempDir(), ".agents", "blueprints", "workflows", "review-pipeline.json")
 	created, err := EnsureDefaultWorkflow(path)

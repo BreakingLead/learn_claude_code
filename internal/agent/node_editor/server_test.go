@@ -334,6 +334,9 @@ func TestServerWorkflowAPI(t *testing.T) {
 	if len(validation.Agents) != 3 || validation.Agents[0].BlueprintID != "default" {
 		t.Fatalf("unexpected workflow agent resolutions: %+v", validation.Agents)
 	}
+	if len(validation.Diagnostics) != 0 {
+		t.Fatalf("unexpected workflow diagnostics: %+v", validation.Diagnostics)
+	}
 
 	workflow.Name = "Updated Review Pipeline"
 	raw, err = json.Marshal(workflow)

@@ -73,11 +73,12 @@ type BlueprintValidationResponse struct {
 }
 
 type WorkflowValidationResponse struct {
-	OK     bool                      `json:"ok"`
-	Error  string                    `json:"error,omitempty"`
-	Order  []string                  `json:"order,omitempty"`
-	Steps  []WorkflowExecutionStep   `json:"steps,omitempty"`
-	Agents []WorkflowAgentResolution `json:"agents,omitempty"`
+	OK          bool                      `json:"ok"`
+	Error       string                    `json:"error,omitempty"`
+	Diagnostics []string                  `json:"diagnostics,omitempty"`
+	Order       []string                  `json:"order,omitempty"`
+	Steps       []WorkflowExecutionStep   `json:"steps,omitempty"`
+	Agents      []WorkflowAgentResolution `json:"agents,omitempty"`
 }
 
 type WorkflowSimulationRequest struct {
@@ -445,7 +446,13 @@ func (s *Store) ValidateWorkflow(workflow WorkflowDefinition) WorkflowValidation
 	for _, step := range steps {
 		order = append(order, step.NodeID)
 	}
-	return WorkflowValidationResponse{OK: true, Order: order, Steps: steps, Agents: s.ResolveWorkflowAgents(workflow)}
+	return WorkflowValidationResponse{
+		OK:          true,
+		Diagnostics: WorkflowDiagnostics(workflow),
+		Order:       order,
+		Steps:       steps,
+		Agents:      s.ResolveWorkflowAgents(workflow),
+	}
 }
 
 func (s *Store) ValidateWorkflowAgentReferences(workflow WorkflowDefinition) error {

@@ -1280,9 +1280,15 @@
           const order = workflowValidationResult.order || [];
           const steps = workflowValidationResult.steps || [];
           const agents = workflowValidationResult.agents || [];
+          const diagnostics = workflowValidationResult.diagnostics || [];
           return React.createElement("div", { className: "validation", key: "workflow-validation" }, [
             React.createElement("div", { className: "validation-title", key: "title" }, "Workflow valid"),
             React.createElement("div", { className: "muted", key: "order" }, `order: ${order.join(" -> ") || "(empty)"}`),
+            diagnostics.length > 0
+              ? React.createElement("div", { className: "diagnostics", key: "diagnostics" },
+                  diagnostics.map((item) => React.createElement("div", { key: item }, item))
+                )
+              : null,
             steps.length > 0
               ? React.createElement("div", { className: "field", key: "steps" }, [
                   React.createElement("label", { key: "label" }, "Execution plan"),

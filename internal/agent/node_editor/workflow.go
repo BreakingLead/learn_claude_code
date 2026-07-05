@@ -344,6 +344,51 @@ func SimulateWorkflow(workflow WorkflowDefinition, input string) ([]WorkflowSimu
 	return steps, nil
 }
 
+func WorkflowDiagnostics(workflow WorkflowDefinition) []string {
+	nodes := map[string]WorkflowNode{}
+	incoming := map[string]int{}
+	outgoing := map[string]int{}
+	var inputNodes []string
+	for _, node := range workflow.Nodes {
+		nodes[node.ID] = node
+		if node.Type == WorkflowNodeTypeInput {
+			inputNodes = append(inputNodes, node.ID)
+		}
+	}
+	for _, edge := range workflow.Edges {
+		incoming[edge.Target.Node]++
+		outgoing[edge.Source.Node]++
+	}
+
+	var diagnostics []string
+	if len(inputNodes) == 0 {
+		diagnostics = append(diagnostics, "workflow has no input node")
+	}
+	for _, node := range workflow.Nodes {
+		switch node.Type {
+		case WorkflowNodeTypeAgent:
+			if incoming[node.ID] == 0 {
+				diagnostics = append(diagnostics, fmt.Sprintf("agent node %q has no incoming message", node.ID))
+			}
+			if outgoing[node.ID] == 0 {
+				diagnostics = append(diagnostics, fmt.Sprintf("agent node %q has no outgoing message", node.ID))
+			}
+		case WorkflowNodeTypeInput:
+			if outgoing[node.ID] == 0 {
+				diagnostics = append(diagnostics, fmt.Sprintf("input node %q is not connected", node.ID))
+			}
+		case WorkflowNodeTypeOutput:
+			if incoming[node.ID] == 0 {
+				diagnostics = append(diagnostics, fmt.Sprintf("output node %q has no incoming message", node.ID))
+			}
+		}
+	}
+	for _, nodeID := range unreachableWorkflowNodes(nodes, workflow.Edges, inputNodes) {
+		diagnostics = append(diagnostics, fmt.Sprintf("node %q is not reachable from a workflow input", nodeID))
+	}
+	return diagnostics
+}
+
 func validateWorkflowNode(node WorkflowNode) error {
 	switch node.Type {
 	case WorkflowNodeTypeInput, WorkflowNodeTypeOutput:
@@ -470,4 +515,33 @@ func workflowSimulationTargets(portID string, outgoing []Edge) []Endpoint {
 
 func endpointKey(endpoint Endpoint) string {
 	return endpoint.Node + ":" + endpoint.Port
+}
+
+func unreachableWorkflowNodes(nodes map[string]WorkflowNode, edges []Edge, roots []string) []string {
+	if len(roots) == 0 {
+		return nil
+	}
+	children := map[string][]string{}
+	for _, edge := range edges {
+		children[edge.Source.Node] = append(children[edge.Source.Node], edge.Target.Node)
+	}
+	seen := map[string]bool{}
+	stack := append([]string(nil), roots...)
+	for len(stack) > 0 {
+		nodeID := stack[len(stack)-1]
+		stack = stack[:len(stack)-1]
+		if seen[nodeID] {
+			continue
+		}
+		seen[nodeID] = true
+		stack = append(stack, children[nodeID]...)
+	}
+	var unreachable []string
+	for nodeID := range nodes {
+		if !seen[nodeID] {
+			unreachable = append(unreachable, nodeID)
+		}
+	}
+	sort.Strings(unreachable)
+	return unreachable
 }
