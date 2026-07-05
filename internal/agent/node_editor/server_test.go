@@ -604,6 +604,35 @@ func TestServerWorkflowPlanListAndGetAPI(t *testing.T) {
 	}
 }
 
+func TestServerDeleteWorkflowPlanAPI(t *testing.T) {
+	workdir := t.TempDir()
+	if _, err := EnsureDefaultBlueprint(DefaultBlueprintPath(workdir)); err != nil {
+		t.Fatal(err)
+	}
+	store := NewStore(workdir)
+	if _, _, err := store.SaveCompiledWorkflowPlan(DefaultWorkflow()); err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(NewServer(workdir).Handler())
+	defer server.Close()
+
+	req, err := http.NewRequest(http.MethodDelete, server.URL+"/api/workflow-plans/review-pipeline", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("delete workflow plan status = %d", resp.StatusCode)
+	}
+	if _, err := store.ReadWorkflowPlan("review-pipeline"); err == nil {
+		t.Fatal("expected workflow plan to be deleted")
+	}
+}
+
 func TestServerCreateWorkflowAPI(t *testing.T) {
 	workdir := t.TempDir()
 	if _, err := EnsureDefaultBlueprint(DefaultBlueprintPath(workdir)); err != nil {

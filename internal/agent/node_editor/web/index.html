@@ -715,6 +715,25 @@
           setStatus(`loaded compiled plan ${data.workflow_id}`);
         }, [workflowPlans]);
 
+        const deleteWorkflowPlan = async () => {
+          if (!activeWorkflowPlanId) return;
+          if (!window.confirm(`Delete workflow plan ${activeWorkflowPlanId}?`)) return;
+          try {
+            const response = await fetch(`/api/workflow-plans/${activeWorkflowPlanId}`, { method: "DELETE" });
+            const result = await response.json();
+            if (!response.ok || !result.ok) {
+              setStatus(`workflow plan delete failed: ${result.error || response.statusText}`);
+              return;
+            }
+            setWorkflowCompileResult(null);
+            setCompiledPlanPath("");
+            await loadWorkflowPlans();
+            setStatus("workflow plan deleted");
+          } catch (error) {
+            setStatus(`workflow plan delete failed: ${error.message}`);
+          }
+        };
+
         const loadTemplates = useCallback(async () => {
           try {
             const response = await fetch("/api/node-templates");
@@ -1720,6 +1739,13 @@
                         disabled: !activeWorkflowPlanId,
                         onClick: () => loadWorkflowPlan(activeWorkflowPlanId).catch((error) => setStatus(`workflow plan load failed: ${error.message}`)),
                       }, "Load Plan")
+                    : null,
+                  editorMode === "workflow"
+                    ? React.createElement("button", {
+                        key: "delete-workflow-plan",
+                        disabled: !activeWorkflowPlanId,
+                        onClick: deleteWorkflowPlan,
+                      }, "Delete Plan")
                     : null,
                   editorMode === "blueprint"
                     ? React.createElement("button", {
