@@ -679,6 +679,49 @@ func TestServerRefreshWorkflowPlanAPI(t *testing.T) {
 	}
 }
 
+func TestServerRunWorkflowPlanAPI(t *testing.T) {
+	workdir := t.TempDir()
+	if _, err := EnsureDefaultBlueprint(DefaultBlueprintPath(workdir)); err != nil {
+		t.Fatal(err)
+	}
+	store := NewStore(workdir)
+	workflow := DefaultWorkflow()
+	if err := store.WriteWorkflow("review-pipeline", workflow); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := store.SaveCompiledWorkflowPlan(workflow); err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(NewServer(workdir).Handler())
+	defer server.Close()
+
+	raw, err := json.Marshal(WorkflowPlanRunRequest{Input: "build the API"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := http.Post(server.URL+"/api/workflow-plans/review-pipeline/run", "application/json", bytes.NewReader(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("run workflow plan status = %d", resp.StatusCode)
+	}
+	var payload WorkflowPlanRunResponse
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatal(err)
+	}
+	if !payload.OK {
+		t.Fatalf("expected run to succeed: %+v", payload)
+	}
+	if len(payload.Run.Steps) != 3 {
+		t.Fatalf("expected three agent dry-run steps: %+v", payload.Run.Steps)
+	}
+	if len(payload.Run.Outputs) != 1 || !strings.Contains(payload.Run.Outputs[0].Content, "Summary Agent") {
+		t.Fatalf("unexpected run output: %+v", payload.Run.Outputs)
+	}
+}
+
 func TestServerCreateWorkflowAPI(t *testing.T) {
 	workdir := t.TempDir()
 	if _, err := EnsureDefaultBlueprint(DefaultBlueprintPath(workdir)); err != nil {

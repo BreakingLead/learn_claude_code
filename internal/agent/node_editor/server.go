@@ -784,6 +784,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/workflow-plans", s.handleListWorkflowPlans)
 	mux.HandleFunc("GET /api/workflow-plans/{id}", s.handleGetWorkflowPlan)
 	mux.HandleFunc("POST /api/workflow-plans/{id}/refresh", s.handleRefreshWorkflowPlan)
+	mux.HandleFunc("POST /api/workflow-plans/{id}/run", s.handleRunWorkflowPlan)
 	mux.HandleFunc("DELETE /api/workflow-plans/{id}", s.handleDeleteWorkflowPlan)
 	static, _ := fs.Sub(webFS, "web")
 	mux.Handle("GET /", http.FileServer(http.FS(static)))
@@ -952,6 +953,20 @@ func (s *Server) handleRefreshWorkflowPlan(w http.ResponseWriter, r *http.Reques
 	writeJSON(w, http.StatusOK, WorkflowCompiledPlanSaveResponse{OK: true, Path: path, Plan: plan})
 }
 
+func (s *Server) handleRunWorkflowPlan(w http.ResponseWriter, r *http.Request) {
+	request, err := decodeWorkflowPlanRunRequest(r.Body)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, WorkflowPlanRunResponse{OK: false, Error: err.Error()})
+		return
+	}
+	run, err := s.store.RunWorkflowPlan(r.PathValue("id"), request.Input)
+	if err != nil {
+		writeJSON(w, http.StatusOK, WorkflowPlanRunResponse{OK: false, Error: err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, WorkflowPlanRunResponse{OK: true, Run: run})
+}
+
 func (s *Server) handleCreateWorkflow(w http.ResponseWriter, r *http.Request) {
 	request, err := decodeCreateBlueprint(r.Body)
 	if err != nil {
@@ -1114,6 +1129,17 @@ func decodeWorkflowSimulationRequest(body io.Reader) (WorkflowSimulationRequest,
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&request); err != nil {
 		return WorkflowSimulationRequest{}, err
+	}
+	return request, nil
+}
+
+func decodeWorkflowPlanRunRequest(body io.Reader) (WorkflowPlanRunRequest, error) {
+	defer io.Copy(io.Discard, body)
+	var request WorkflowPlanRunRequest
+	decoder := json.NewDecoder(body)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&request); err != nil {
+		return WorkflowPlanRunRequest{}, err
 	}
 	return request, nil
 }

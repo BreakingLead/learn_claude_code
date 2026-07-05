@@ -606,6 +606,7 @@
         const [workflowValidationResult, setWorkflowValidationResult] = useState(null);
         const [workflowSimulationResult, setWorkflowSimulationResult] = useState(null);
         const [workflowCompileResult, setWorkflowCompileResult] = useState(null);
+        const [workflowRunResult, setWorkflowRunResult] = useState(null);
         const [compiledPlanPath, setCompiledPlanPath] = useState("");
         const [workflowSimulationInput, setWorkflowSimulationInput] = useState("Describe the change you want this workflow to handle.");
         const activeWorkflowPlan = workflowPlans.find((plan) => plan.id === activeWorkflowPlanId) || null;
@@ -642,6 +643,7 @@
           setWorkflowValidationResult(null);
           setWorkflowSimulationResult(null);
           setWorkflowCompileResult(null);
+          setWorkflowRunResult(null);
           setCompiledPlanPath("");
           if (message) setStatus(message);
         }, [setEdges, setNodes]);
@@ -711,6 +713,7 @@
           const summary = workflowPlans.find((plan) => plan.id === data.workflow_id) || {};
           setActiveWorkflowPlanId(data.workflow_id);
           setWorkflowCompileResult({ ok: true, plan: { ...data, stale: !!summary.stale, current_hash: summary.current_hash || "" } });
+          setWorkflowRunResult(null);
           setCompiledPlanPath(summary.path || "");
           setStatus(`loaded compiled plan ${data.workflow_id}`);
         }, [workflowPlans]);
@@ -726,6 +729,7 @@
               return;
             }
             setWorkflowCompileResult(null);
+            setWorkflowRunResult(null);
             setCompiledPlanPath("");
             await loadWorkflowPlans();
             setStatus("workflow plan deleted");
@@ -750,6 +754,27 @@
             setStatus(`workflow plan refreshed: ${result.path || "(unknown path)"}`);
           } catch (error) {
             setStatus(`workflow plan refresh failed: ${error.message}`);
+          }
+        };
+
+        const runWorkflowPlan = async () => {
+          if (!activeWorkflowPlanId) return;
+          try {
+            const response = await fetch(`/api/workflow-plans/${activeWorkflowPlanId}/run`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ input: workflowSimulationInput }),
+            });
+            const result = await response.json();
+            setWorkflowRunResult(result);
+            if (!response.ok || !result.ok) {
+              setStatus(`workflow plan run failed: ${result.error || response.statusText}`);
+              return;
+            }
+            setStatus(`workflow plan dry-run ready: ${(result.run?.steps || []).length} agent steps`);
+          } catch (error) {
+            setWorkflowRunResult({ ok: false, error: error.message });
+            setStatus(`workflow plan run failed: ${error.message}`);
           }
         };
 
@@ -1577,6 +1602,59 @@
           ]);
         };
 
+        const renderWorkflowRunResult = () => {
+          if (!workflowRunResult) return null;
+          if (!workflowRunResult.ok) {
+            return React.createElement("div", { className: "validation", key: "workflow-run" }, [
+              React.createElement("div", { className: "validation-title", key: "title" }, "Workflow Plan Run"),
+              React.createElement("div", { className: "diagnostics", key: "error" },
+                workflowRunResult.error || "Workflow plan run failed."
+              ),
+            ]);
+          }
+          const run = workflowRunResult.run || {};
+          return React.createElement("div", { className: "validation", key: "workflow-run" }, [
+            React.createElement("div", { className: "validation-title", key: "title" }, "Workflow plan dry-run"),
+            React.createElement("div", { className: "muted", key: "input" }, `input: ${run.input || "(empty)"}`),
+            run.stale
+              ? React.createElement("div", { className: "diagnostics", key: "stale" },
+                  `stale plan: current workflow hash ${(run.current_hash || "").slice(0, 12) || "(missing)"}`
+                )
+              : null,
+            (run.diagnostics || []).length > 0
+              ? React.createElement("div", { className: "diagnostics", key: "diagnostics" },
+                  run.diagnostics.map((item) => React.createElement("div", { key: item }, item))
+                )
+              : null,
+            ...(run.steps || []).map((step, index) => React.createElement("div", { className: "validation", key: step.node_id }, [
+              React.createElement("div", { className: "validation-title", key: "title" },
+                `${index + 1}. ${step.label || step.node_id}`
+              ),
+              React.createElement("div", { className: "muted", key: "blueprint" }, `blueprint: ${step.blueprint_id || "(none)"}`),
+              (step.inputs || []).length > 0
+                ? React.createElement("pre", { className: "code-preview", key: "inputs" },
+                    `receives:\n${(step.inputs || []).map((input) => `${input.from_node}.${input.from_port} -> ${step.node_id}.${input.target_port}\n${input.content || "(empty)"}`).join("\n\n")}`
+                  )
+                : null,
+              (step.outputs || []).length > 0
+                ? React.createElement("pre", { className: "code-preview", key: "outputs" },
+                    `emits:\n${(step.outputs || []).map((output) => `${step.node_id}.${output.port} -> ${(output.to || []).map((target) => `${target.node}.${target.port}`).join(", ") || "(end)"}\n${output.content || "(empty)"}`).join("\n\n")}`
+                  )
+                : null,
+            ])),
+            (run.outputs || []).length > 0
+              ? React.createElement("div", { className: "field", key: "outputs" }, [
+                  React.createElement("label", { key: "label" }, "Final outputs"),
+                  ...(run.outputs || []).map((output) =>
+                    React.createElement("pre", { className: "code-preview", key: output.node_id },
+                      `${output.label || output.node_id}\n${output.content || "(empty)"}`
+                    )
+                  ),
+                ])
+              : null,
+          ]);
+        };
+
         const saveWorkflow = async () => {
           try {
             const next = JSON.parse(workflowSource);
@@ -1765,6 +1843,13 @@
                         disabled: !activeWorkflowPlanId,
                         onClick: refreshWorkflowPlan,
                       }, "Refresh Plan")
+                    : null,
+                  editorMode === "workflow"
+                    ? React.createElement("button", {
+                        key: "run-workflow-plan",
+                        disabled: !activeWorkflowPlanId,
+                        onClick: runWorkflowPlan,
+                      }, "Run Plan")
                     : null,
                   editorMode === "workflow"
                     ? React.createElement("button", {
@@ -2006,6 +2091,7 @@
                     ]),
                     renderWorkflowSimulationResult(),
                     renderWorkflowCompileResult(),
+                    renderWorkflowRunResult(),
                     React.createElement("div", { className: "muted", key: "help" }, activeWorkflowId
                       ? "Edit the multi-agent workflow DAG JSON. Validation checks typed message ports and cycle-free execution order."
                       : "No workflow selected."),
