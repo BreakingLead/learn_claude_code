@@ -531,6 +531,38 @@
         };
       }
 
+      function workflowNode(kind, workflow, agentBlueprint) {
+        const id = nextNodeId(workflow, kind);
+        const base = {
+          id,
+          position: { x: 160 + (workflow.nodes || []).length * 40, y: 180 },
+        };
+        if (kind === "workflow-input") {
+          return {
+            ...base,
+            type: "workflow_input",
+            label: "Input",
+            outputs: [{ id: "message", type: "message", label: "Message", direction: "output" }],
+          };
+        }
+        if (kind === "workflow-output") {
+          return {
+            ...base,
+            type: "workflow_output",
+            label: "Output",
+            inputs: [{ id: "message", type: "message", label: "Message", direction: "input" }],
+          };
+        }
+        return {
+          ...base,
+          type: "workflow_agent",
+          label: "Agent",
+          agent_blueprint: agentBlueprint || "default",
+          inputs: [{ id: "input", type: "message", label: "Input", direction: "input" }],
+          outputs: [{ id: "output", type: "message", label: "Output", direction: "output" }],
+        };
+      }
+
       function App() {
         const [blueprint, setBlueprint] = useState(null);
         const [source, setSource] = useState("");
@@ -827,6 +859,19 @@
             // Keep the user's invalid draft in the editor; validation will report the parse error.
           }
         }, [setEdges, setNodes]);
+
+        const addWorkflowNode = useCallback((kind) => {
+          try {
+            const workflow = JSON.parse(workflowSource);
+            const node = workflowNode(kind, workflow, activeBlueprintId || "default");
+            updateWorkflowDocument({
+              ...workflow,
+              nodes: [...(workflow.nodes || []), node],
+            }, `added ${node.label}`);
+          } catch (error) {
+            setStatus(`workflow node failed: ${error.message}`);
+          }
+        }, [activeBlueprintId, updateWorkflowDocument, workflowSource]);
 
         const deleteSelectedNode = useCallback(() => {
           if (!blueprint || !selectedNode || selectedNode.id === blueprint.root_agent) return;
@@ -1261,6 +1306,27 @@
                         disabled: !workflowSource.trim(),
                         onClick: validateWorkflow,
                       }, "Validate Workflow")
+                    : null,
+                  editorMode === "workflow"
+                    ? React.createElement("button", {
+                        key: "add-workflow-input",
+                        disabled: !workflowSource.trim(),
+                        onClick: () => addWorkflowNode("workflow-input"),
+                      }, "+ Input")
+                    : null,
+                  editorMode === "workflow"
+                    ? React.createElement("button", {
+                        key: "add-workflow-agent",
+                        disabled: !workflowSource.trim(),
+                        onClick: () => addWorkflowNode("workflow-agent"),
+                      }, "+ Agent")
+                    : null,
+                  editorMode === "workflow"
+                    ? React.createElement("button", {
+                        key: "add-workflow-output",
+                        disabled: !workflowSource.trim(),
+                        onClick: () => addWorkflowNode("workflow-output"),
+                      }, "+ Output")
                     : null,
                   editorMode === "blueprint"
                     ? React.createElement("button", { key: "save", onClick: save }, "Save")
