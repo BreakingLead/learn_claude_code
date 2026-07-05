@@ -60,7 +60,7 @@
 
       .panel {
         display: grid;
-        grid-template-rows: 44px 1fr;
+        grid-template-rows: 44px minmax(190px, 28vh) 1fr;
         min-width: 0;
         min-height: 0;
         background: #111318;
@@ -78,6 +78,7 @@
       .actions {
         display: flex;
         gap: 8px;
+        flex-wrap: wrap;
       }
 
       button {
@@ -96,18 +97,58 @@
         background: #2b3240;
       }
 
+      input,
       textarea {
         width: 100%;
-        height: 100%;
-        resize: none;
-        border: 0;
+        border: 1px solid #303746;
+        border-radius: 6px;
         outline: none;
-        padding: 14px;
+        padding: 8px;
         background: #0d0f14;
         color: #e6e9ef;
+        font: inherit;
+      }
+
+      textarea {
+        height: 100%;
+        resize: none;
         font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
         font-size: 12px;
         line-height: 1.5;
+      }
+
+      .json-editor {
+        border: 0;
+        border-radius: 0;
+        padding: 14px;
+      }
+
+      .inspector {
+        min-height: 0;
+        overflow: auto;
+        border-bottom: 1px solid #2a2f3a;
+        padding: 12px;
+        display: grid;
+        gap: 10px;
+      }
+
+      .field {
+        display: grid;
+        gap: 5px;
+      }
+
+      .field label {
+        color: #aab2c0;
+        font-size: 12px;
+      }
+
+      .config-editor {
+        min-height: 82px;
+      }
+
+      .muted {
+        color: #818b9d;
+        font-size: 12px;
       }
 
       .node {
@@ -298,20 +339,92 @@
         };
       }
 
+      function slug(text) {
+        return String(text || "node")
+          .toLowerCase()
+          .replace(/[^a-z0-9_-]+/g, "-")
+          .replace(/^-+|-+$/g, "") || "node";
+      }
+
+      function nextNodeId(blueprint, prefix) {
+        const existing = new Set((blueprint.nodes || []).map((node) => node.id));
+        for (let index = 1; index < 10000; index += 1) {
+          const id = `${prefix}-${index}`;
+          if (!existing.has(id)) return id;
+        }
+        return `${prefix}-${Date.now()}`;
+      }
+
+      function nodeTemplate(kind, blueprint) {
+        const basePosition = { x: 120, y: 520 + (blueprint.nodes || []).length * 40 };
+        if (kind === "skill") {
+          const id = nextNodeId(blueprint, "skill");
+          return {
+            id,
+            type: "skill",
+            label: "Skill",
+            position: basePosition,
+            outputs: [{ id: "prompt_out", type: "prompt", label: "Prompt", direction: "output" }],
+            config: { source: "inline", prompt: "Write skill instructions here." },
+          };
+        }
+        if (kind === "toolset") {
+          const id = nextNodeId(blueprint, "toolset");
+          return {
+            id,
+            type: "toolset",
+            label: "Toolset",
+            position: basePosition,
+            outputs: [{ id: "toolset_out", type: "toolset", label: "Toolset", direction: "output" }],
+            config: { tools: ["read_file", "glob"] },
+          };
+        }
+        if (kind === "memory") {
+          const id = nextNodeId(blueprint, "memory");
+          return {
+            id,
+            type: "memory",
+            label: "Memory",
+            position: basePosition,
+            outputs: [{ id: "memory_out", type: "memory", label: "Memory", direction: "output" }],
+            config: { source: "default_memory" },
+          };
+        }
+        const id = nextNodeId(blueprint, "prompt");
+        return {
+          id,
+          type: "prompt",
+          label: "Prompt",
+          position: basePosition,
+          outputs: [{ id: "prompt_out", type: "prompt", label: "Prompt", direction: "output" }],
+          config: { source: "inline", prompt: "Write prompt text here." },
+        };
+      }
+
       function App() {
         const [blueprint, setBlueprint] = useState(null);
         const [source, setSource] = useState("");
         const [status, setStatus] = useState("loading default blueprint");
         const [nodes, setNodes, onNodesChange] = useNodesState([]);
         const [edges, setEdges, onEdgesChange] = useEdgesState([]);
+        const [selectedNodeId, setSelectedNodeId] = useState("");
+        const selectedNode = (blueprint?.nodes || []).find((node) => node.id === selectedNodeId) || null;
+        const [configDraft, setConfigDraft] = useState("");
 
-        const setBlueprintDocument = useCallback((next, message) => {
+        const updateDocument = useCallback((next, message) => {
           setBlueprint(next);
           setSource(JSON.stringify(next, null, 2));
           setNodes(toFlowNodes(next));
           setEdges(toFlowEdges(next));
           if (message) setStatus(message);
         }, [setEdges, setNodes]);
+
+        const setBlueprintDocument = useCallback((next, message) => {
+          updateDocument(next, message);
+          if (selectedNodeId && !(next.nodes || []).some((node) => node.id === selectedNodeId)) {
+            setSelectedNodeId("");
+          }
+        }, [selectedNodeId, updateDocument]);
 
         const load = useCallback(async () => {
           const response = await fetch("/api/blueprints/default");
@@ -323,6 +436,10 @@
           load().catch((error) => setStatus(`load failed: ${error.message}`));
         }, [load]);
 
+        useEffect(() => {
+          setConfigDraft(selectedNode ? JSON.stringify(selectedNode.config || {}, null, 2) : "");
+        }, [selectedNodeId]);
+
         const validConnection = useCallback((connection) => {
           if (!blueprint) return false;
           return connectionError(blueprint, edges, connection) === "";
@@ -333,6 +450,17 @@
           setBlueprintDocument(next);
           return next;
         };
+
+        const addNode = useCallback((kind) => {
+          if (!blueprint) return;
+          const node = nodeTemplate(kind, blueprint);
+          const next = {
+            ...blueprint,
+            nodes: [...(blueprint.nodes || []), node],
+          };
+          updateDocument(next, `added ${node.label}`);
+          setSelectedNodeId(node.id);
+        }, [blueprint, updateDocument]);
 
         const connect = useCallback((connection) => {
           if (!blueprint) return;
@@ -386,6 +514,45 @@
           setStatus("edge removed");
         }, [blueprint]);
 
+        const selectNode = useCallback((_, node) => {
+          setSelectedNodeId(node.id);
+        }, []);
+
+        const updateSelectedNode = useCallback((patch) => {
+          if (!blueprint || !selectedNode) return;
+          const next = {
+            ...blueprint,
+            nodes: (blueprint.nodes || []).map((node) =>
+              node.id === selectedNode.id ? { ...node, ...patch } : node
+            ),
+          };
+          updateDocument(next, "node updated");
+        }, [blueprint, selectedNode, updateDocument]);
+
+        const updateSelectedConfig = useCallback((raw) => {
+          setConfigDraft(raw);
+          if (!selectedNode) return;
+          try {
+            const config = JSON.parse(raw);
+            updateSelectedNode({ config });
+          } catch (error) {
+            setStatus(`config invalid: ${error.message}`);
+          }
+        }, [selectedNode, updateSelectedNode]);
+
+        const deleteSelectedNode = useCallback(() => {
+          if (!blueprint || !selectedNode || selectedNode.type === "agent") return;
+          const next = {
+            ...blueprint,
+            nodes: (blueprint.nodes || []).filter((node) => node.id !== selectedNode.id),
+            edges: (blueprint.edges || []).filter((edge) =>
+              edge.source.node !== selectedNode.id && edge.target.node !== selectedNode.id
+            ),
+          };
+          updateDocument(next, "node removed");
+          setSelectedNodeId("");
+        }, [blueprint, selectedNode, updateDocument]);
+
         const validate = async () => {
           try {
             const next = parseSource();
@@ -419,6 +586,12 @@
         return React.createElement("div", { className: "app" }, [
           React.createElement("div", { className: "topbar", key: "topbar" }, [
             React.createElement("div", { className: "brand", key: "brand" }, "Bee Agent Builder"),
+            React.createElement("div", { className: "actions", key: "palette" }, [
+              React.createElement("button", { key: "add-prompt", onClick: () => addNode("prompt") }, "+ Prompt"),
+              React.createElement("button", { key: "add-skill", onClick: () => addNode("skill") }, "+ Skill"),
+              React.createElement("button", { key: "add-toolset", onClick: () => addNode("toolset") }, "+ Toolset"),
+              React.createElement("button", { key: "add-memory", onClick: () => addNode("memory") }, "+ Memory"),
+            ]),
             React.createElement("div", { className: "status", key: "status" }, status),
           ]),
           React.createElement("div", { className: "layout", key: "layout" }, [
@@ -431,6 +604,7 @@
                 onEdgesChange,
                 onConnect: connect,
                 onEdgesDelete: deleteEdges,
+                onNodeClick: selectNode,
                 onNodeDragStop: updateNodePosition,
                 isValidConnection: validConnection,
                 fitView: true,
@@ -447,7 +621,38 @@
                   React.createElement("button", { key: "save", onClick: save }, "Save"),
                 ]),
               ]),
+              React.createElement("div", { className: "inspector", key: "inspector" }, selectedNode
+                ? [
+                    React.createElement("div", { className: "field", key: "id" }, [
+                      React.createElement("label", { key: "label" }, "Node"),
+                      React.createElement("input", { key: "input", value: selectedNode.id, readOnly: true }),
+                    ]),
+                    React.createElement("div", { className: "field", key: "label-field" }, [
+                      React.createElement("label", { key: "label" }, "Label"),
+                      React.createElement("input", {
+                        key: "input",
+                        value: selectedNode.label || "",
+                        onChange: (event) => updateSelectedNode({ label: event.target.value }),
+                      }),
+                    ]),
+                    React.createElement("div", { className: "field", key: "config" }, [
+                      React.createElement("label", { key: "label" }, "Config JSON"),
+                      React.createElement("textarea", {
+                        className: "config-editor",
+                        key: "textarea",
+                        value: configDraft,
+                        spellCheck: "false",
+                        onChange: (event) => updateSelectedConfig(event.target.value),
+                      }),
+                    ]),
+                    selectedNode.type === "agent"
+                      ? React.createElement("div", { className: "muted", key: "agent-note" }, "Agent nodes cannot be deleted.")
+                      : React.createElement("button", { key: "delete", onClick: deleteSelectedNode }, "Delete Node"),
+                  ]
+                : React.createElement("div", { className: "muted" }, "Select a node to edit its label and config.")
+              ),
               React.createElement("textarea", {
+                className: "json-editor",
                 key: "editor",
                 value: source,
                 spellCheck: "false",
