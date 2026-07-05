@@ -147,3 +147,40 @@ func TestValidateAllowsMultipleToolsets(t *testing.T) {
 		t.Fatalf("unexpected toolset nodes: %s", got)
 	}
 }
+
+func TestEffectiveToolNamesAppliesPolicyNodes(t *testing.T) {
+	blueprint := DefaultBlueprint()
+	blueprint.Nodes = append(blueprint.Nodes, Node{
+		ID:       "readonly-policy",
+		Type:     NodeTypePolicy,
+		Label:    "Readonly Policy",
+		Position: Position{X: 360, Y: 380},
+		Inputs: []Port{
+			{ID: "toolset_in", Type: PortTypeToolset, Label: "Tools In", Direction: DirectionInput, Multiple: true},
+		},
+		Outputs: []Port{
+			{ID: "toolset_out", Type: PortTypeToolset, Label: "Tools Out", Direction: DirectionOutput},
+		},
+		Config: map[string]any{
+			"allow_tools": []string{"read_file", "glob"},
+			"deny_tools":  []string{"glob"},
+		},
+	})
+	blueprint.Edges = []Edge{
+		{ID: "edge-tools-policy", Source: Endpoint{Node: "core-tools", Port: "toolset_out"}, Target: Endpoint{Node: "readonly-policy", Port: "toolset_in"}},
+		{ID: "edge-policy-agent", Source: Endpoint{Node: "readonly-policy", Port: "toolset_out"}, Target: Endpoint{Node: "agent-main", Port: "toolset_in"}},
+		{ID: "edge-project-agent", Source: Endpoint{Node: "project-context", Port: "prompt_out"}, Target: Endpoint{Node: "agent-main", Port: "prompt_1"}},
+		{ID: "edge-build-agent", Source: Endpoint{Node: "build-mode", Port: "prompt_out"}, Target: Endpoint{Node: "agent-main", Port: "prompt_2"}},
+	}
+	resolved, err := Resolve(blueprint)
+	if err != nil {
+		t.Fatal(err)
+	}
+	capabilities := EffectiveToolNames(blueprint, resolved)
+	if !capabilities.Resolved {
+		t.Fatal("expected capabilities to resolve")
+	}
+	if got := strings.Join(capabilities.ToolNames, ","); got != "read_file" {
+		t.Fatalf("unexpected effective tools: %s", got)
+	}
+}

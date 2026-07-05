@@ -325,7 +325,8 @@ func (s *Server) handleValidateBlueprint(w http.ResponseWriter, r *http.Request)
 		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "error": err.Error()})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "resolved": resolved, "expanded": expanded})
+	capabilities := EffectiveToolNames(expanded, resolved)
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "resolved": resolved, "expanded": expanded, "capabilities": capabilities})
 }
 
 func (s *Server) handleListComposites(w http.ResponseWriter, r *http.Request) {

@@ -60,13 +60,17 @@ func TestServerBlueprintAPI(t *testing.T) {
 	}
 	defer resp.Body.Close()
 	var validation struct {
-		OK bool `json:"ok"`
+		OK           bool                 `json:"ok"`
+		Capabilities CapabilityResolution `json:"capabilities"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&validation); err != nil {
 		t.Fatal(err)
 	}
 	if !validation.OK {
 		t.Fatal("expected valid blueprint")
+	}
+	if !validation.Capabilities.Resolved || len(validation.Capabilities.ToolNames) == 0 {
+		t.Fatalf("expected validation capabilities, got %+v", validation.Capabilities)
 	}
 }
 

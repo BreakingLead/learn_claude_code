@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
-	"sort"
 	"strings"
 )
 
@@ -52,113 +51,11 @@ func (rt *agentRuntime) blueprintToolNames(fallback []string) []string {
 	if rt == nil || rt.blueprint == nil || !rt.blueprint.Enabled || rt.blueprint.Error != "" {
 		return fallback
 	}
-	nodes := blueprintNodeMap(rt.blueprint.Graph)
-	toolSet := map[string]bool{}
-	resolvedAny := false
-	for _, nodeID := range rt.blueprint.Resolved.ToolsetNodes {
-		names, ok := rt.blueprintToolNamesForNode(nodeID, nodes, nil)
-		if !ok {
-			continue
-		}
-		resolvedAny = true
-		for _, name := range names {
-			if strings.TrimSpace(name) != "" {
-				toolSet[name] = true
-			}
-		}
-	}
-	if !resolvedAny {
+	capabilities := nodeeditor.EffectiveToolNames(rt.blueprint.Graph, rt.blueprint.Resolved)
+	if !capabilities.Resolved {
 		return fallback
 	}
-	names := make([]string, 0, len(toolSet))
-	for name := range toolSet {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	return names
-}
-
-func (rt *agentRuntime) blueprintToolNamesForNode(nodeID string, nodes map[string]nodeeditor.Node, stack []string) ([]string, bool) {
-	if containsBlueprintStack(stack, nodeID) {
-		return nil, false
-	}
-	node, ok := nodes[nodeID]
-	if !ok {
-		return nil, false
-	}
-	switch node.Type {
-	case nodeeditor.NodeTypeToolset:
-		return stringSliceConfig(node.Config, "tools"), true
-	case nodeeditor.NodeTypePolicy:
-		upstream, upstreamOK := rt.blueprintUpstreamToolNames(node.ID, nodes, append(stack, nodeID))
-		if !upstreamOK {
-			upstream = nil
-		}
-		return filterPolicyToolNames(upstream, stringSliceConfig(node.Config, "allow_tools"), stringSliceConfig(node.Config, "deny_tools")), true
-	default:
-		return stringSliceConfig(node.Config, "tools"), len(stringSliceConfig(node.Config, "tools")) > 0
-	}
-}
-
-func (rt *agentRuntime) blueprintUpstreamToolNames(nodeID string, nodes map[string]nodeeditor.Node, stack []string) ([]string, bool) {
-	toolSet := map[string]bool{}
-	resolvedAny := false
-	for _, edge := range rt.blueprint.Graph.Edges {
-		if edge.Target.Node != nodeID {
-			continue
-		}
-		targetPort := portForBlueprintEndpoint(nodes, edge.Target, nodeeditor.DirectionInput)
-		sourcePort := portForBlueprintEndpoint(nodes, edge.Source, nodeeditor.DirectionOutput)
-		if targetPort.Type != nodeeditor.PortTypeToolset || sourcePort.Type != nodeeditor.PortTypeToolset {
-			continue
-		}
-		names, ok := rt.blueprintToolNamesForNode(edge.Source.Node, nodes, stack)
-		if !ok {
-			continue
-		}
-		resolvedAny = true
-		for _, name := range names {
-			if strings.TrimSpace(name) != "" {
-				toolSet[name] = true
-			}
-		}
-	}
-	names := make([]string, 0, len(toolSet))
-	for name := range toolSet {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	return names, resolvedAny
-}
-
-func filterPolicyToolNames(upstream []string, allow []string, deny []string) []string {
-	allowSet := map[string]bool{}
-	for _, name := range allow {
-		name = strings.TrimSpace(name)
-		if name != "" {
-			allowSet[name] = true
-		}
-	}
-	denySet := map[string]bool{}
-	for _, name := range deny {
-		name = strings.TrimSpace(name)
-		if name != "" {
-			denySet[name] = true
-		}
-	}
-	var names []string
-	for _, name := range upstream {
-		name = strings.TrimSpace(name)
-		if name == "" || denySet[name] {
-			continue
-		}
-		if len(allowSet) > 0 && !allowSet[name] {
-			continue
-		}
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	return names
+	return capabilities.ToolNames
 }
 
 func (rt *agentRuntime) blueprintPromptBlocks(toolNames []string) ([]PromptBlock, bool) {
@@ -287,23 +184,6 @@ func (rt *agentRuntime) promptBlocksForBlueprintNode(node nodeeditor.Node, toolN
 	}
 }
 
-func portForBlueprintEndpoint(nodes map[string]nodeeditor.Node, endpoint nodeeditor.Endpoint, direction string) nodeeditor.Port {
-	node, ok := nodes[endpoint.Node]
-	if !ok {
-		return nodeeditor.Port{}
-	}
-	ports := node.Outputs
-	if direction == nodeeditor.DirectionInput {
-		ports = node.Inputs
-	}
-	for _, port := range ports {
-		if port.ID == endpoint.Port {
-			return port
-		}
-	}
-	return nodeeditor.Port{}
-}
-
 func (rt *agentRuntime) blueprintSnapshot() any {
 	if rt == nil || rt.blueprint == nil {
 		return nil
@@ -324,15 +204,6 @@ func blueprintNodeMap(blueprint nodeeditor.Blueprint) map[string]nodeeditor.Node
 		nodes[node.ID] = node
 	}
 	return nodes
-}
-
-func containsBlueprintStack(values []string, target string) bool {
-	for _, value := range values {
-		if value == target {
-			return true
-		}
-	}
-	return false
 }
 
 func stringConfig(config map[string]any, key string) string {

@@ -758,7 +758,13 @@
               body: JSON.stringify(next),
             });
             const result = await response.json();
-            setStatus(result.ok ? `valid: ${result.resolved.id}` : `invalid: ${result.error}`);
+            if (result.ok) {
+              const tools = result.capabilities?.tool_names || [];
+              const preview = tools.slice(0, 5).join(", ");
+              setStatus(`valid: ${result.resolved.id}; tools(${tools.length}) ${preview}`);
+            } else {
+              setStatus(`invalid: ${result.error}`);
+            }
           } catch (error) {
             setStatus(`invalid: ${error.message}`);
           }
