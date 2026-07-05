@@ -820,6 +820,33 @@
           }
         };
 
+        const expandComposites = async () => {
+          try {
+            const next = parseSource();
+            const response = await fetch(`/api/blueprints/${next.id}/validate`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(next),
+            });
+            const result = await response.json();
+            if (!result.ok) {
+              setStatus(`expand failed: ${result.error}`);
+              return;
+            }
+            if (!result.expanded) {
+              setStatus("expand failed: missing expanded blueprint");
+              return;
+            }
+            const before = (next.nodes || []).filter((node) => node.type === "composite").length;
+            const after = (result.expanded.nodes || []).filter((node) => node.type === "composite").length;
+            updateDocument(result.expanded, `expanded composites: ${before - after}`);
+            setSelectedNodeId("");
+            setSelectedNodeIds([]);
+          } catch (error) {
+            setStatus(`expand failed: ${error.message}`);
+          }
+        };
+
         const renderValidationResult = () => {
           if (!validationResult) return null;
           if (!validationResult.ok) {
@@ -1048,6 +1075,9 @@
                         disabled: selectedNodeIds.length === 0 && !selectedNodeId,
                         onClick: createComposite,
                       }, "Create Composite")
+                    : null,
+                  editorMode === "blueprint"
+                    ? React.createElement("button", { key: "expand", onClick: expandComposites }, "Expand Composites")
                     : null,
                   editorMode === "blueprint"
                     ? React.createElement("button", { key: "validate", onClick: validate }, "Validate")
