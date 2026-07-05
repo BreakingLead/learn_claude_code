@@ -387,6 +387,54 @@ func TestServerWorkflowValidationRejectsMissingAgentBlueprint(t *testing.T) {
 	}
 }
 
+func TestServerCreateWorkflowAPI(t *testing.T) {
+	workdir := t.TempDir()
+	if _, err := EnsureDefaultBlueprint(DefaultBlueprintPath(workdir)); err != nil {
+		t.Fatal(err)
+	}
+	store := NewStore(workdir)
+	if err := store.WriteWorkflow("review-pipeline", DefaultWorkflow()); err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(NewServer(workdir).Handler())
+	defer server.Close()
+
+	request := CreateBlueprintRequest{
+		ID:       "qa-pipeline",
+		Name:     "QA Pipeline",
+		SourceID: "review-pipeline",
+	}
+	raw, err := json.Marshal(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := http.Post(server.URL+"/api/workflows", "application/json", bytes.NewReader(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("status = %d, want 201", resp.StatusCode)
+	}
+	var payload struct {
+		OK       bool               `json:"ok"`
+		Workflow WorkflowDefinition `json:"workflow"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatal(err)
+	}
+	if !payload.OK || payload.Workflow.ID != "qa-pipeline" || payload.Workflow.Name != "QA Pipeline" {
+		t.Fatalf("unexpected payload: %+v", payload)
+	}
+	stored, err := store.ReadWorkflow("qa-pipeline")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Metadata["copied_from"] != "review-pipeline" {
+		t.Fatalf("unexpected workflow metadata: %+v", stored.Metadata)
+	}
+}
+
 func TestServerPutWorkflowValidatesRouteID(t *testing.T) {
 	workdir := t.TempDir()
 	server := httptest.NewServer(NewServer(workdir).Handler())

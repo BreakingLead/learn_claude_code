@@ -339,6 +339,49 @@ func (s *Store) ReadWorkflow(id string) (WorkflowDefinition, error) {
 	return ReadWorkflow(path)
 }
 
+func (s *Store) CreateWorkflow(request CreateBlueprintRequest) (WorkflowDefinition, error) {
+	id := safeID(request.ID)
+	if id == "" {
+		return WorkflowDefinition{}, fmt.Errorf("workflow id is required")
+	}
+	path, err := s.WorkflowPath(id)
+	if err != nil {
+		return WorkflowDefinition{}, err
+	}
+	if _, err := os.Stat(path); err == nil {
+		return WorkflowDefinition{}, fmt.Errorf("workflow %q already exists", id)
+	} else if !os.IsNotExist(err) {
+		return WorkflowDefinition{}, err
+	}
+
+	var workflow WorkflowDefinition
+	if strings.TrimSpace(request.SourceID) != "" {
+		workflow, err = s.ReadWorkflow(request.SourceID)
+		if err != nil {
+			return WorkflowDefinition{}, fmt.Errorf("read source workflow %q: %w", request.SourceID, err)
+		}
+	} else {
+		workflow = DefaultWorkflow()
+	}
+	workflow.ID = id
+	if strings.TrimSpace(request.Name) != "" {
+		workflow.Name = strings.TrimSpace(request.Name)
+	} else if strings.TrimSpace(workflow.Name) == "" || strings.TrimSpace(request.SourceID) == "" {
+		workflow.Name = id
+	}
+	if workflow.Metadata == nil {
+		workflow.Metadata = map[string]any{}
+	}
+	workflow.Metadata["created_by"] = "node_editor"
+	if request.SourceID != "" {
+		workflow.Metadata["copied_from"] = request.SourceID
+	}
+	if err := s.WriteWorkflow(id, workflow); err != nil {
+		return WorkflowDefinition{}, err
+	}
+	return workflow, nil
+}
+
 func (s *Store) WriteWorkflow(id string, workflow WorkflowDefinition) error {
 	path, err := s.WorkflowPath(id)
 	if err != nil {
@@ -407,6 +450,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PUT /api/composites/{id}", s.handlePutComposite)
 	mux.HandleFunc("POST /api/composites/from-selection", s.handleCompositeFromSelection)
 	mux.HandleFunc("GET /api/workflows", s.handleListWorkflows)
+	mux.HandleFunc("POST /api/workflows", s.handleCreateWorkflow)
 	mux.HandleFunc("GET /api/workflows/{id}", s.handleGetWorkflow)
 	mux.HandleFunc("PUT /api/workflows/{id}", s.handlePutWorkflow)
 	mux.HandleFunc("POST /api/workflows/{id}/validate", s.handleValidateWorkflow)
@@ -540,6 +584,20 @@ func (s *Server) handleListWorkflows(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"workflows": summaries})
+}
+
+func (s *Server) handleCreateWorkflow(w http.ResponseWriter, r *http.Request) {
+	request, err := decodeCreateBlueprint(r.Body)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	workflow, err := s.store.CreateWorkflow(request)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]any{"ok": true, "workflow": workflow})
 }
 
 func (s *Server) handleGetWorkflow(w http.ResponseWriter, r *http.Request) {
