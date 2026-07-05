@@ -186,7 +186,7 @@ func TestPlanExecutorTimesOutExternalCommand(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), context.DeadlineExceeded.Error()) {
 		t.Fatalf("expected timeout error, got %v", err)
 	}
-	if run.Status != WorkflowRunStatusFailed || !strings.Contains(run.Error, context.DeadlineExceeded.Error()) {
+	if run.Status != WorkflowRunStatusFailed || !strings.Contains(run.Error, context.DeadlineExceeded.Error()) || run.StartedAt == "" || run.FinishedAt == "" {
 		t.Fatalf("expected failed run on timeout: %+v", run)
 	}
 }

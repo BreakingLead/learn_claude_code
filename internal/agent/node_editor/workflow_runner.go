@@ -28,6 +28,9 @@ type WorkflowPlanRun struct {
 	WorkflowID      string                  `json:"workflow_id"`
 	Name            string                  `json:"name"`
 	CreatedAt       string                  `json:"created_at,omitempty"`
+	StartedAt       string                  `json:"started_at,omitempty"`
+	FinishedAt      string                  `json:"finished_at,omitempty"`
+	DurationMS      int64                   `json:"duration_ms,omitempty"`
 	ExecutionMode   string                  `json:"execution_mode,omitempty"`
 	ExternalCommand []string                `json:"external_command,omitempty"`
 	TimeoutMS       int                     `json:"timeout_ms,omitempty"`
@@ -47,6 +50,9 @@ type WorkflowPlanRunStep struct {
 	Label       string                      `json:"label"`
 	BlueprintID string                      `json:"blueprint_id"`
 	Instruction string                      `json:"instruction,omitempty"`
+	StartedAt   string                      `json:"started_at,omitempty"`
+	FinishedAt  string                      `json:"finished_at,omitempty"`
+	DurationMS  int64                       `json:"duration_ms,omitempty"`
 	Inputs      []WorkflowPlanRunInput      `json:"inputs,omitempty"`
 	Outputs     []WorkflowPlanRunStepOutput `json:"outputs,omitempty"`
 }
@@ -189,10 +195,12 @@ func (e PlanExecutor) Execute(ctx context.Context, plan WorkflowCompiledPlan, in
 	if strings.TrimSpace(input) == "" {
 		input = "Sample workflow input"
 	}
+	runStart := time.Now()
 	messages := map[string]string{}
 	run := WorkflowPlanRun{
 		WorkflowID:  plan.WorkflowID,
 		Name:        plan.Name,
+		StartedAt:   runStart.UTC().Format(time.RFC3339Nano),
 		TimeoutMS:   e.TimeoutMS,
 		Status:      WorkflowRunStatusCompleted,
 		SourceHash:  plan.SourceHash,
@@ -205,7 +213,9 @@ func (e PlanExecutor) Execute(ctx context.Context, plan WorkflowCompiledPlan, in
 			return failWorkflowPlanRun(run, err), err
 		}
 		stepInputs := workflowPlanRunInputs(agentRun.Inputs, messages, input)
+		stepStart := time.Now()
 		result, err := invoker.InvokeAgent(ctx, AgentInvocation{Run: agentRun, Inputs: stepInputs})
+		stepFinish := time.Now()
 		if err != nil {
 			err = fmt.Errorf("invoke agent %q: %w", agentRun.NodeID, err)
 			return failWorkflowPlanRun(run, err), err
@@ -215,6 +225,9 @@ func (e PlanExecutor) Execute(ctx context.Context, plan WorkflowCompiledPlan, in
 			Label:       agentRun.Label,
 			BlueprintID: agentRun.BlueprintID,
 			Instruction: agentRun.Instruction,
+			StartedAt:   stepStart.UTC().Format(time.RFC3339Nano),
+			FinishedAt:  stepFinish.UTC().Format(time.RFC3339Nano),
+			DurationMS:  durationMillis(stepFinish.Sub(stepStart)),
 			Inputs:      stepInputs,
 		}
 		run.Diagnostics = append(run.Diagnostics, result.Diagnostics...)
@@ -239,16 +252,45 @@ func (e PlanExecutor) Execute(ctx context.Context, plan WorkflowCompiledPlan, in
 			Inputs:  inputs,
 		})
 	}
+	finishWorkflowPlanRun(&run, runStart, time.Now())
 	return run, nil
 }
 
 func failWorkflowPlanRun(run WorkflowPlanRun, err error) WorkflowPlanRun {
 	run.Status = WorkflowRunStatusFailed
+	if run.StartedAt != "" {
+		finishWorkflowPlanRun(&run, parseWorkflowRunTime(run.StartedAt), time.Now())
+	}
 	if err != nil {
 		run.Error = err.Error()
 		run.Diagnostics = append(run.Diagnostics, err.Error())
 	}
 	return run
+}
+
+func finishWorkflowPlanRun(run *WorkflowPlanRun, started time.Time, finished time.Time) {
+	if run == nil {
+		return
+	}
+	run.FinishedAt = finished.UTC().Format(time.RFC3339Nano)
+	if !started.IsZero() {
+		run.DurationMS = durationMillis(finished.Sub(started))
+	}
+}
+
+func parseWorkflowRunTime(value string) time.Time {
+	parsed, err := time.Parse(time.RFC3339Nano, value)
+	if err != nil {
+		return time.Time{}
+	}
+	return parsed
+}
+
+func durationMillis(duration time.Duration) int64 {
+	if duration < 0 {
+		return 0
+	}
+	return duration.Milliseconds()
 }
 
 func (DryRunAgentInvoker) InvokeAgent(ctx context.Context, invocation AgentInvocation) (AgentInvocationResult, error) {

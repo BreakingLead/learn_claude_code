@@ -1722,6 +1722,9 @@
                 )
               : null,
             React.createElement("div", { className: "muted", key: "timeout" }, `timeout: ${run.timeout_ms || 30000}ms`),
+            run.duration_ms !== undefined
+              ? React.createElement("div", { className: "muted", key: "duration" }, `duration: ${run.duration_ms}ms`)
+              : null,
             React.createElement("div", { className: "muted", key: "input" }, `input: ${run.input || "(empty)"}`),
             run.stale
               ? React.createElement("div", { className: "diagnostics", key: "stale" },
@@ -1738,6 +1741,9 @@
                 `${index + 1}. ${step.label || step.node_id}`
               ),
               React.createElement("div", { className: "muted", key: "blueprint" }, `blueprint: ${step.blueprint_id || "(none)"}`),
+              step.duration_ms !== undefined
+                ? React.createElement("div", { className: "muted", key: "duration" }, `duration: ${step.duration_ms}ms`)
+                : null,
               (step.inputs || []).length > 0
                 ? React.createElement("pre", { className: "code-preview", key: "inputs" },
                     `receives:\n${(step.inputs || []).map((input) => `${input.from_node}.${input.from_port} -> ${step.node_id}.${input.target_port}\n${input.content || "(empty)"}`).join("\n\n")}`

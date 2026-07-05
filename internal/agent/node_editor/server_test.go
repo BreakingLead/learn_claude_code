@@ -720,8 +720,11 @@ func TestServerRunWorkflowPlanAPI(t *testing.T) {
 	if len(payload.Run.Outputs) != 1 || !strings.Contains(payload.Run.Outputs[0].Content, "Summary Agent") {
 		t.Fatalf("unexpected run output: %+v", payload.Run.Outputs)
 	}
-	if payload.Run.ID == "" || payload.Run.CreatedAt == "" || payload.Run.ExecutionMode != "dry_run" || payload.Run.TimeoutMS != DefaultWorkflowRunTimeoutMS {
+	if payload.Run.ID == "" || payload.Run.CreatedAt == "" || payload.Run.StartedAt == "" || payload.Run.FinishedAt == "" || payload.Run.ExecutionMode != "dry_run" || payload.Run.TimeoutMS != DefaultWorkflowRunTimeoutMS {
 		t.Fatalf("expected saved run metadata: %+v", payload.Run)
+	}
+	if len(payload.Run.Steps) == 0 || payload.Run.Steps[0].StartedAt == "" || payload.Run.Steps[0].FinishedAt == "" {
+		t.Fatalf("expected run step timing: %+v", payload.Run.Steps)
 	}
 
 	resp, err = http.Get(server.URL + "/api/workflow-runs/review-pipeline")
@@ -735,7 +738,7 @@ func TestServerRunWorkflowPlanAPI(t *testing.T) {
 	if err := json.NewDecoder(resp.Body).Decode(&listPayload); err != nil {
 		t.Fatal(err)
 	}
-	if len(listPayload.Runs) != 1 || listPayload.Runs[0].ID != payload.Run.ID || listPayload.Runs[0].ExecutionMode != "dry_run" || listPayload.Runs[0].TimeoutMS != DefaultWorkflowRunTimeoutMS {
+	if len(listPayload.Runs) != 1 || listPayload.Runs[0].ID != payload.Run.ID || listPayload.Runs[0].StartedAt == "" || listPayload.Runs[0].FinishedAt == "" || listPayload.Runs[0].ExecutionMode != "dry_run" || listPayload.Runs[0].TimeoutMS != DefaultWorkflowRunTimeoutMS {
 		t.Fatalf("unexpected run list: %+v", listPayload.Runs)
 	}
 

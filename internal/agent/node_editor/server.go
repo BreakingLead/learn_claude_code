@@ -61,6 +61,9 @@ type WorkflowRunSummary struct {
 	Name            string   `json:"name"`
 	Path            string   `json:"path"`
 	CreatedAt       string   `json:"created_at"`
+	StartedAt       string   `json:"started_at,omitempty"`
+	FinishedAt      string   `json:"finished_at,omitempty"`
+	DurationMS      int64    `json:"duration_ms,omitempty"`
 	ExecutionMode   string   `json:"execution_mode,omitempty"`
 	ExternalCommand []string `json:"external_command,omitempty"`
 	TimeoutMS       int      `json:"timeout_ms,omitempty"`
@@ -414,6 +417,9 @@ func (s *Store) ListWorkflowRuns(workflowID string) ([]WorkflowRunSummary, error
 			Name:            run.Name,
 			Path:            path,
 			CreatedAt:       run.CreatedAt,
+			StartedAt:       run.StartedAt,
+			FinishedAt:      run.FinishedAt,
+			DurationMS:      run.DurationMS,
 			ExecutionMode:   run.ExecutionMode,
 			ExternalCommand: append([]string(nil), run.ExternalCommand...),
 			TimeoutMS:       run.TimeoutMS,
