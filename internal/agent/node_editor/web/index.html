@@ -505,6 +505,10 @@
         const [templates, setTemplates] = useState(fallbackTemplates);
         const [blueprints, setBlueprints] = useState([]);
         const [activeBlueprintId, setActiveBlueprintId] = useState("default");
+        const [composites, setComposites] = useState([]);
+        const [activeCompositeId, setActiveCompositeId] = useState("");
+        const [compositeSource, setCompositeSource] = useState("");
+        const [editorMode, setEditorMode] = useState("blueprint");
 
         const updateDocument = useCallback((next, message) => {
           setBlueprint(next);
@@ -535,6 +539,23 @@
           setBlueprints(Array.isArray(data.blueprints) ? data.blueprints : []);
         }, []);
 
+        const loadComposites = useCallback(async () => {
+          const response = await fetch("/api/composites");
+          const data = await response.json();
+          if (!response.ok) throw new Error(data.error || response.statusText);
+          setComposites(Array.isArray(data.composites) ? data.composites : []);
+        }, []);
+
+        const loadComposite = useCallback(async (id) => {
+          const response = await fetch(`/api/composites/${id}`);
+          const data = await response.json();
+          if (!response.ok) throw new Error(data.error || response.statusText);
+          setActiveCompositeId(data.id);
+          setCompositeSource(JSON.stringify(data, null, 2));
+          setEditorMode("composite");
+          setStatus(`loaded composite ${data.id}`);
+        }, []);
+
         const loadTemplates = useCallback(async () => {
           try {
             const response = await fetch("/api/node-templates");
@@ -549,8 +570,9 @@
 
         useEffect(() => {
           loadBlueprints().catch((error) => setStatus(`list failed: ${error.message}`));
+          loadComposites().catch((error) => setStatus(`composite list failed: ${error.message}`));
           loadBlueprint("default").catch((error) => setStatus(`load failed: ${error.message}`));
-        }, [loadBlueprint, loadBlueprints]);
+        }, [loadBlueprint, loadBlueprints, loadComposites]);
 
         useEffect(() => {
           loadTemplates();
@@ -710,6 +732,9 @@
               return;
             }
             await loadTemplates();
+            await loadComposites();
+            setActiveCompositeId(result.composite.id);
+            setCompositeSource(JSON.stringify(result.composite, null, 2));
             const wrapped = wrapSelectionWithComposite(next, nodeIDs, result.composite);
             if (wrapped.error) {
               setStatus(`created composite: ${result.composite.id}; ${wrapped.error}`);
@@ -760,6 +785,41 @@
             setBlueprintDocument(result.blueprint, `created ${result.blueprint.id}`);
           } catch (error) {
             setStatus(`create failed: ${error.message}`);
+          }
+        };
+
+        const openCompositePanel = async () => {
+          if (activeCompositeId) {
+            await loadComposite(activeCompositeId);
+            return;
+          }
+          if (composites.length === 0) {
+            setStatus("no composites yet");
+            setEditorMode("composite");
+            return;
+          }
+          await loadComposite(composites[0].id);
+        };
+
+        const saveComposite = async () => {
+          try {
+            const next = JSON.parse(compositeSource);
+            const response = await fetch(`/api/composites/${next.id}`, {
+              method: "PUT",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(next),
+            });
+            const result = await response.json();
+            if (!response.ok || !result.ok) {
+              setStatus(`composite save failed: ${result.error || response.statusText}`);
+              return;
+            }
+            setActiveCompositeId(next.id);
+            await loadComposites();
+            await loadTemplates();
+            setStatus("composite saved");
+          } catch (error) {
+            setStatus(`composite save failed: ${error.message}`);
           }
         };
 
@@ -839,18 +899,48 @@
             ),
             React.createElement("div", { className: "panel", key: "panel" }, [
               React.createElement("div", { className: "panelbar", key: "panelbar" }, [
-                React.createElement("span", { key: "label" }, "Blueprint JSON"),
+                React.createElement("span", { key: "label" }, editorMode === "blueprint" ? "Blueprint JSON" : "Composite JSON"),
                 React.createElement("div", { className: "actions", key: "actions" }, [
                   React.createElement("button", {
-                    key: "composite",
-                    disabled: selectedNodeIds.length === 0 && !selectedNodeId,
-                    onClick: createComposite,
-                  }, "Create Composite"),
-                  React.createElement("button", { key: "validate", onClick: validate }, "Validate"),
-                  React.createElement("button", { key: "save", onClick: save }, "Save"),
+                    key: "blueprint-mode",
+                    disabled: editorMode === "blueprint",
+                    onClick: () => setEditorMode("blueprint"),
+                  }, "Blueprint"),
+                  React.createElement("button", {
+                    key: "composite-mode",
+                    disabled: editorMode === "composite" && composites.length === 0,
+                    onClick: () => openCompositePanel().catch((error) => setStatus(`composite load failed: ${error.message}`)),
+                  }, "Composites"),
+                  editorMode === "composite" && composites.length > 0
+                    ? React.createElement("select", {
+                        key: "composite-select",
+                        value: activeCompositeId,
+                        onChange: (event) => loadComposite(event.target.value).catch((error) => setStatus(`composite load failed: ${error.message}`)),
+                      }, composites.map((item) =>
+                        React.createElement("option", { key: item.id, value: item.id }, item.name ? `${item.name} (${item.id})` : item.id)
+                      ))
+                    : null,
+                  editorMode === "blueprint"
+                    ? React.createElement("button", {
+                        key: "composite",
+                        disabled: selectedNodeIds.length === 0 && !selectedNodeId,
+                        onClick: createComposite,
+                      }, "Create Composite")
+                    : null,
+                  editorMode === "blueprint"
+                    ? React.createElement("button", { key: "validate", onClick: validate }, "Validate")
+                    : null,
+                  editorMode === "blueprint"
+                    ? React.createElement("button", { key: "save", onClick: save }, "Save")
+                    : React.createElement("button", {
+                        key: "save-composite",
+                        disabled: !compositeSource.trim(),
+                        onClick: saveComposite,
+                      }, "Save Composite"),
                 ]),
               ]),
-              React.createElement("div", { className: "inspector", key: "inspector" }, selectedNode
+              editorMode === "blueprint"
+                ? React.createElement("div", { className: "inspector", key: "inspector" }, selectedNode
                 ? [
                     React.createElement("div", { className: "field", key: "id" }, [
                       React.createElement("label", { key: "label" }, "Node"),
@@ -926,14 +1016,27 @@
                       : React.createElement("button", { key: "delete", onClick: deleteSelectedNode }, "Delete Node"),
                   ]
                 : React.createElement("div", { className: "muted" }, "Select a node to edit its label and config.")
-              ),
-              React.createElement("textarea", {
-                className: "json-editor",
-                key: "editor",
-                value: source,
-                spellCheck: "false",
-                onChange: (event) => setSource(event.target.value),
-              }),
+              )
+                : React.createElement("div", { className: "inspector", key: "composite-inspector" },
+                    React.createElement("div", { className: "muted" }, activeCompositeId
+                      ? "Edit the reusable composite definition directly. Saving refreshes node templates."
+                      : "No composite selected.")
+                  ),
+              editorMode === "blueprint"
+                ? React.createElement("textarea", {
+                    className: "json-editor",
+                    key: "editor",
+                    value: source,
+                    spellCheck: "false",
+                    onChange: (event) => setSource(event.target.value),
+                  })
+                : React.createElement("textarea", {
+                    className: "json-editor",
+                    key: "composite-editor",
+                    value: compositeSource,
+                    spellCheck: "false",
+                    onChange: (event) => setCompositeSource(event.target.value),
+                  }),
             ]),
           ]),
         ]);
