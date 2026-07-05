@@ -163,6 +163,42 @@
         font-size: 12px;
       }
 
+      .validation {
+        display: grid;
+        gap: 8px;
+        border: 1px solid #303746;
+        border-radius: 6px;
+        padding: 10px;
+        background: #151922;
+      }
+
+      .validation-title {
+        color: #f5f7fb;
+        font-size: 13px;
+        font-weight: 700;
+      }
+
+      .chip-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+      }
+
+      .chip {
+        border: 1px solid #3b4352;
+        border-radius: 999px;
+        padding: 3px 8px;
+        color: #cbd2dd;
+        font-size: 12px;
+      }
+
+      .diagnostics {
+        display: grid;
+        gap: 4px;
+        color: #ffcc8a;
+        font-size: 12px;
+      }
+
       .node {
         min-width: 170px;
         border: 1px solid #3b4352;
@@ -510,12 +546,14 @@
         const [activeCompositeId, setActiveCompositeId] = useState("");
         const [compositeSource, setCompositeSource] = useState("");
         const [editorMode, setEditorMode] = useState("blueprint");
+        const [validationResult, setValidationResult] = useState(null);
 
         const updateDocument = useCallback((next, message) => {
           setBlueprint(next);
           setSource(JSON.stringify(next, null, 2));
           setNodes(toFlowNodes(next));
           setEdges(toFlowEdges(next));
+          setValidationResult(null);
           if (message) setStatus(message);
         }, [setEdges, setNodes]);
 
@@ -758,6 +796,7 @@
               body: JSON.stringify(next),
             });
             const result = await response.json();
+            setValidationResult(result);
             if (result.ok) {
               const tools = result.capabilities?.tool_names || [];
               const preview = tools.slice(0, 5).join(", ");
@@ -770,6 +809,36 @@
           } catch (error) {
             setStatus(`invalid: ${error.message}`);
           }
+        };
+
+        const renderValidationResult = () => {
+          if (!validationResult) return null;
+          if (!validationResult.ok) {
+            return React.createElement("div", { className: "validation", key: "validation" }, [
+              React.createElement("div", { className: "validation-title", key: "title" }, "Validation"),
+              React.createElement("div", { className: "diagnostics", key: "error" },
+                validationResult.error || "Blueprint is invalid."
+              ),
+            ]);
+          }
+          const tools = validationResult.capabilities?.tool_names || [];
+          const diagnostics = validationResult.capabilities?.diagnostics || [];
+          return React.createElement("div", { className: "validation", key: "validation" }, [
+            React.createElement("div", { className: "validation-title", key: "title" },
+              `Valid: ${validationResult.resolved?.id || "agent"}`
+            ),
+            React.createElement("div", { className: "muted", key: "tools-label" }, `Effective tools (${tools.length})`),
+            tools.length > 0
+              ? React.createElement("div", { className: "chip-row", key: "tools" },
+                  tools.map((tool) => React.createElement("span", { className: "chip", key: tool }, tool))
+                )
+              : React.createElement("div", { className: "muted", key: "no-tools" }, "No tools resolved."),
+            diagnostics.length > 0
+              ? React.createElement("div", { className: "diagnostics", key: "diagnostics" },
+                  diagnostics.map((item, index) => React.createElement("div", { key: `diagnostic-${index}` }, item))
+                )
+              : React.createElement("div", { className: "muted", key: "no-diagnostics" }, "No capability diagnostics."),
+          ]);
         };
 
         const createBlueprint = async (sourceID) => {
@@ -949,7 +1018,9 @@
                 ]),
               ]),
               editorMode === "blueprint"
-                ? React.createElement("div", { className: "inspector", key: "inspector" }, selectedNode
+                ? React.createElement("div", { className: "inspector", key: "inspector" }, [
+                    renderValidationResult(),
+                    ...(selectedNode
                 ? [
                     React.createElement("div", { className: "field", key: "id" }, [
                       React.createElement("label", { key: "label" }, "Node"),
@@ -1050,20 +1121,23 @@
                       ? React.createElement("div", { className: "muted", key: "agent-note" }, "Agent nodes cannot be deleted.")
                       : React.createElement("button", { key: "delete", onClick: deleteSelectedNode }, "Delete Node"),
                   ]
-                : React.createElement("div", { className: "muted" }, "Select a node to edit its label and config.")
-              )
+                : [React.createElement("div", { className: "muted", key: "empty-selection" }, "Select a node to edit its label and config.")])
+                  ])
                 : React.createElement("div", { className: "inspector", key: "composite-inspector" },
                     React.createElement("div", { className: "muted" }, activeCompositeId
                       ? "Edit the reusable composite definition directly. Saving refreshes node templates."
                       : "No composite selected.")
                   ),
               editorMode === "blueprint"
-                ? React.createElement("textarea", {
+                  ? React.createElement("textarea", {
                     className: "json-editor",
                     key: "editor",
                     value: source,
                     spellCheck: "false",
-                    onChange: (event) => setSource(event.target.value),
+                    onChange: (event) => {
+                      setSource(event.target.value);
+                      setValidationResult(null);
+                    },
                   })
                 : React.createElement("textarea", {
                     className: "json-editor",
