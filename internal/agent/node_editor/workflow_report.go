@@ -48,6 +48,27 @@ func WorkflowRunMarkdownReport(run WorkflowPlanRun) string {
 		fmt.Fprintf(&b, "- Error: %s\n", markdownInline(run.Error))
 	}
 
+	if run.PlanSnapshot != nil {
+		b.WriteString("\n## Plan Snapshot\n\n")
+		fmt.Fprintf(&b, "- Workflow ID: %s\n", markdownInline(run.PlanSnapshot.WorkflowID))
+		if run.PlanSnapshot.SourceHash != "" {
+			fmt.Fprintf(&b, "- Source hash: %s\n", markdownInline(run.PlanSnapshot.SourceHash))
+		}
+		if len(run.PlanSnapshot.Order) > 0 {
+			fmt.Fprintf(&b, "- Order: %s\n", markdownInline(strings.Join(run.PlanSnapshot.Order, " -> ")))
+		}
+		if len(run.PlanSnapshot.AgentRuns) > 0 {
+			b.WriteString("\nAgent runs:\n")
+			for _, agentRun := range run.PlanSnapshot.AgentRuns {
+				label := strings.TrimSpace(agentRun.Label)
+				if label == "" {
+					label = agentRun.NodeID
+				}
+				fmt.Fprintf(&b, "- %s via %s\n", markdownInline(label), markdownInline(agentRun.BlueprintID))
+			}
+		}
+	}
+
 	b.WriteString("\n## Input\n\n")
 	writeMarkdownBlock(&b, run.Input)
 

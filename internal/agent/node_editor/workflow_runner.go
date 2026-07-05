@@ -40,6 +40,7 @@ type WorkflowPlanRun struct {
 	SourceHash      string                  `json:"source_hash"`
 	CurrentHash     string                  `json:"current_hash,omitempty"`
 	Stale           bool                    `json:"stale"`
+	PlanSnapshot    *WorkflowCompiledPlan   `json:"plan_snapshot,omitempty"`
 	Input           string                  `json:"input"`
 	Steps           []WorkflowPlanRunStep   `json:"steps,omitempty"`
 	Outputs         []WorkflowPlanRunOutput `json:"outputs,omitempty"`
@@ -200,15 +201,17 @@ func (e PlanExecutor) Execute(ctx context.Context, plan WorkflowCompiledPlan, in
 	}
 	runStart := time.Now()
 	messages := map[string]string{}
+	planSnapshot := plan
 	run := WorkflowPlanRun{
-		WorkflowID:  plan.WorkflowID,
-		Name:        plan.Name,
-		StartedAt:   runStart.UTC().Format(time.RFC3339Nano),
-		TimeoutMS:   e.TimeoutMS,
-		Status:      WorkflowRunStatusCompleted,
-		SourceHash:  plan.SourceHash,
-		Input:       input,
-		Diagnostics: append([]string(nil), plan.Diagnostics...),
+		WorkflowID:   plan.WorkflowID,
+		Name:         plan.Name,
+		StartedAt:    runStart.UTC().Format(time.RFC3339Nano),
+		TimeoutMS:    e.TimeoutMS,
+		Status:       WorkflowRunStatusCompleted,
+		SourceHash:   plan.SourceHash,
+		PlanSnapshot: &planSnapshot,
+		Input:        input,
+		Diagnostics:  append([]string(nil), plan.Diagnostics...),
 	}
 
 	for _, agentRun := range plan.AgentRuns {

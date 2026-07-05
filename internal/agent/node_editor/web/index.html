@@ -1769,6 +1769,11 @@
                   `stale plan: current workflow hash ${(run.current_hash || "").slice(0, 12) || "(missing)"}`
                 )
               : null,
+            run.plan_snapshot
+              ? React.createElement("div", { className: "muted", key: "plan-snapshot" },
+                  `plan snapshot: ${(run.plan_snapshot.agent_runs || []).length} agents, source ${(run.plan_snapshot.source_hash || "").slice(0, 12) || "(missing)"}`
+                )
+              : null,
             (run.diagnostics || []).length > 0
               ? React.createElement("div", { className: "diagnostics", key: "diagnostics" },
                   run.diagnostics.map((item) => React.createElement("div", { key: item }, item))

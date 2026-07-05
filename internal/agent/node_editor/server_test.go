@@ -725,6 +725,9 @@ func TestServerRunWorkflowPlanAPI(t *testing.T) {
 	if payload.Run.ID == "" || payload.Run.CreatedAt == "" || payload.Run.StartedAt == "" || payload.Run.FinishedAt == "" || payload.Run.ExecutionMode != "dry_run" || payload.Run.TimeoutMS != DefaultWorkflowRunTimeoutMS {
 		t.Fatalf("expected saved run metadata: %+v", payload.Run)
 	}
+	if payload.Run.PlanSnapshot == nil || payload.Run.PlanSnapshot.WorkflowID != "review-pipeline" || len(payload.Run.PlanSnapshot.AgentRuns) != 3 {
+		t.Fatalf("expected run to include compiled plan snapshot: %+v", payload.Run.PlanSnapshot)
+	}
 	if len(payload.Run.Steps) == 0 || payload.Run.Steps[0].StartedAt == "" || payload.Run.Steps[0].FinishedAt == "" {
 		t.Fatalf("expected run step timing: %+v", payload.Run.Steps)
 	}
@@ -759,6 +762,9 @@ func TestServerRunWorkflowPlanAPI(t *testing.T) {
 	if stored.ID != payload.Run.ID || stored.Input != "build the API" {
 		t.Fatalf("unexpected stored run: %+v", stored)
 	}
+	if stored.PlanSnapshot == nil || len(stored.PlanSnapshot.AgentRuns) != 3 {
+		t.Fatalf("expected stored run plan snapshot: %+v", stored.PlanSnapshot)
+	}
 
 	resp, err = http.Get(server.URL + "/api/workflow-runs/review-pipeline/" + payload.Run.ID + "/report")
 	if err != nil {
@@ -773,7 +779,7 @@ func TestServerRunWorkflowPlanAPI(t *testing.T) {
 	if resp.StatusCode != http.StatusOK || !strings.HasPrefix(resp.Header.Get("Content-Type"), "text/markdown") {
 		t.Fatalf("unexpected report response: status=%d content-type=%q", resp.StatusCode, resp.Header.Get("Content-Type"))
 	}
-	if !strings.Contains(report, "# Workflow Run Report") || !strings.Contains(report, payload.Run.ID) || !strings.Contains(report, "build the API") || !strings.Contains(report, "Summary Agent") {
+	if !strings.Contains(report, "# Workflow Run Report") || !strings.Contains(report, "## Plan Snapshot") || !strings.Contains(report, payload.Run.ID) || !strings.Contains(report, "build the API") || !strings.Contains(report, "Summary Agent") {
 		t.Fatalf("unexpected workflow run report:\n%s", report)
 	}
 
