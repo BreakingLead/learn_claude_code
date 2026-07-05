@@ -61,6 +61,35 @@ func TestRuntimeUsesBlueprintToolsetWhenEnabled(t *testing.T) {
 	}
 }
 
+func TestRuntimeLoadsConfiguredBlueprintPath(t *testing.T) {
+	workdir := t.TempDir()
+	config := testConfig(workdir)
+	config.UseBlueprint = true
+	customPath := filepath.Join(workdir, ".agents", "blueprints", "agents", "review-agent.json")
+	config.BlueprintPath = customPath
+	blueprint := nodeeditor.DefaultBlueprint()
+	blueprint.ID = "review-agent"
+	blueprint.Name = "Review Agent"
+	for index := range blueprint.Nodes {
+		if blueprint.Nodes[index].ID == "core-tools" {
+			blueprint.Nodes[index].Config = map[string]any{"tools": []string{"todo_write"}}
+		}
+	}
+	if err := nodeeditor.WriteBlueprint(customPath, blueprint); err != nil {
+		t.Fatal(err)
+	}
+
+	rt := newAgentRuntime(config, nil, nil)
+	snapshot := rt.blueprintSnapshot().(map[string]any)
+	if snapshot["graph"] != "review-agent" || snapshot["path"] != customPath {
+		t.Fatalf("unexpected snapshot: %#v", snapshot)
+	}
+	got := strings.Join(rt.mainAgentSpec().ToolNames, ",")
+	if got != "todo_write" {
+		t.Fatalf("expected custom blueprint tools, got %s", got)
+	}
+}
+
 func TestRuntimeExpandsCompositeToolsetWhenEnabled(t *testing.T) {
 	workdir := t.TempDir()
 	config := testConfig(workdir)

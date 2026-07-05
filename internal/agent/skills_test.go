@@ -110,6 +110,7 @@ func testConfig(workdir string) agentConfig {
 		TeamMessagesPath:     filepath.Join(workdir, ".agents", "team", "messages.jsonl"),
 		SessionDir:           filepath.Join(workdir, ".agents", "sessions"),
 		DefaultBlueprintPath: filepath.Join(workdir, ".agents", "blueprints", "agents", "default.json"),
+		BlueprintPath:        filepath.Join(workdir, ".agents", "blueprints", "agents", "default.json"),
 		UseBlueprint:         false,
 		ModeConfigPath:       filepath.Join(workdir, ".agents", "modes.json"),
 		BackgroundTimeout:    10 * time.Minute,

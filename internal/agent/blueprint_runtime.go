@@ -18,11 +18,15 @@ type runtimeBlueprint struct {
 }
 
 func (rt *agentRuntime) loadRuntimeBlueprint() *runtimeBlueprint {
+	path := rt.config.BlueprintPath
+	if strings.TrimSpace(path) == "" {
+		path = rt.config.DefaultBlueprintPath
+	}
 	state := &runtimeBlueprint{
-		Path:    rt.config.DefaultBlueprintPath,
+		Path:    path,
 		Enabled: rt.config.UseBlueprint,
 	}
-	blueprint, err := nodeeditor.ReadBlueprint(rt.config.DefaultBlueprintPath)
+	blueprint, err := nodeeditor.ReadBlueprint(path)
 	if err != nil {
 		state.Error = err.Error()
 		return state

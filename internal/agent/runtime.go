@@ -57,6 +57,7 @@ type agentConfig struct {
 	TeamMessagesPath      string
 	SessionDir            string
 	DefaultBlueprintPath  string
+	BlueprintPath         string
 	UseBlueprint          bool
 	ModeConfigPath        string
 	DefaultTokens         int64
@@ -96,6 +97,7 @@ func newAgentConfig() (agentConfig, error) {
 		TeamMessagesPath:      filepath.Join(workdir, ".agents", "team", "messages.jsonl"),
 		SessionDir:            filepath.Join(workdir, ".agents", "sessions"),
 		DefaultBlueprintPath:  nodeeditor.DefaultBlueprintPath(workdir),
+		BlueprintPath:         blueprintPathFromEnv(workdir),
 		UseBlueprint:          truthyEnv("BEE_AGENT_USE_BLUEPRINT"),
 		ModeConfigPath:        filepath.Join(workdir, ".agents", "modes.json"),
 		DefaultTokens:         8000,
@@ -107,6 +109,35 @@ func newAgentConfig() (agentConfig, error) {
 		BackgroundTimeout:     10 * time.Minute,
 		DisabledModules:       parseDisabledModules(os.Getenv("BEE_AGENT_DISABLED_MODULES")),
 	}, nil
+}
+
+func blueprintPathFromEnv(workdir string) string {
+	if path := strings.TrimSpace(os.Getenv("BEE_AGENT_BLUEPRINT_PATH")); path != "" {
+		if filepath.IsAbs(path) {
+			return path
+		}
+		return filepath.Join(workdir, path)
+	}
+	id := strings.TrimSpace(os.Getenv("BEE_AGENT_BLUEPRINT_ID"))
+	if id == "" {
+		id = "default"
+	}
+	id = safeFileID(id)
+	if id == "" {
+		id = "default"
+	}
+	return filepath.Join(workdir, ".agents", "blueprints", "agents", id+".json")
+}
+
+func safeFileID(id string) string {
+	id = strings.TrimSpace(id)
+	var b strings.Builder
+	for _, r := range id {
+		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '_' {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
 }
 
 func newAgentRuntime(config agentConfig, events chan<- uiEvent, approvals <-chan bool) *agentRuntime {
