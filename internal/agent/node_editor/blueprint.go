@@ -16,6 +16,7 @@ const (
 	NodeTypePrompt    = "prompt"
 	NodeTypeToolset   = "toolset"
 	NodeTypeMemory    = "memory"
+	NodeTypePolicy    = "policy"
 	NodeTypeComposite = "composite"
 
 	PortTypePrompt  = "prompt"

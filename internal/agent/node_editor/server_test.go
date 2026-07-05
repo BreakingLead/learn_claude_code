@@ -145,7 +145,7 @@ func TestServerNodeTemplatesAPI(t *testing.T) {
 	for _, template := range payload.Templates {
 		seen[template.Type] = true
 	}
-	for _, want := range []string{"prompt", "skill", "toolset", "memory"} {
+	for _, want := range []string{"prompt", "skill", "toolset", "memory", "policy"} {
 		if !seen[want] {
 			t.Fatalf("missing template %q in %+v", want, payload.Templates)
 		}

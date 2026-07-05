@@ -479,6 +479,7 @@
         { type: "skill", label: "Skill", node: { type: "skill", label: "Skill", outputs: [{ id: "prompt_out", type: "prompt", label: "Prompt", direction: "output" }], config: { source: "inline", prompt: "Write skill instructions here." } } },
         { type: "toolset", label: "Toolset", node: { type: "toolset", label: "Toolset", outputs: [{ id: "toolset_out", type: "toolset", label: "Toolset", direction: "output" }], config: { tools: ["read_file", "glob"] } } },
         { type: "memory", label: "Memory", node: { type: "memory", label: "Memory", outputs: [{ id: "memory_out", type: "memory", label: "Memory", direction: "output" }], config: { source: "default_memory", path: ".agents/.memory/MEMORY.md" } } },
+        { type: "policy", label: "Policy", node: { type: "policy", label: "Policy", inputs: [{ id: "toolset_in", type: "toolset", label: "Tools In", direction: "input", multiple: true }], outputs: [{ id: "toolset_out", type: "toolset", label: "Tools Out", direction: "output" }, { id: "prompt_out", type: "prompt", label: "Prompt", direction: "output" }], config: { allow_tools: [], deny_tools: ["write_file", "edit_file"], prompt: "Follow this policy before using tools." } } },
       ];
 
       function nodeFromTemplate(template, blueprint) {
@@ -997,6 +998,32 @@
                             placeholder: "read_file, glob",
                             onChange: (event) => patchSelectedConfig({
                               tools: event.target.value.split(",").map((item) => item.trim()).filter(Boolean),
+                            }),
+                          }),
+                        ])
+                      : null,
+                    selectedNode.config && Object.prototype.hasOwnProperty.call(selectedNode.config, "allow_tools")
+                      ? React.createElement("div", { className: "field", key: "allow-tools-field" }, [
+                          React.createElement("label", { key: "label" }, "Allow Tools"),
+                          React.createElement("input", {
+                            key: "input",
+                            value: configValue("allow_tools"),
+                            placeholder: "leave empty to allow all upstream tools",
+                            onChange: (event) => patchSelectedConfig({
+                              allow_tools: event.target.value.split(",").map((item) => item.trim()).filter(Boolean),
+                            }),
+                          }),
+                        ])
+                      : null,
+                    selectedNode.config && Object.prototype.hasOwnProperty.call(selectedNode.config, "deny_tools")
+                      ? React.createElement("div", { className: "field", key: "deny-tools-field" }, [
+                          React.createElement("label", { key: "label" }, "Deny Tools"),
+                          React.createElement("input", {
+                            key: "input",
+                            value: configValue("deny_tools"),
+                            placeholder: "write_file, edit_file",
+                            onChange: (event) => patchSelectedConfig({
+                              deny_tools: event.target.value.split(",").map((item) => item.trim()).filter(Boolean),
                             }),
                           }),
                         ])

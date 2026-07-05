@@ -60,6 +60,25 @@ func BuiltinNodeTemplates() []NodeTemplate {
 				},
 			},
 		},
+		{
+			Type:        NodeTypePolicy,
+			Label:       "Policy",
+			Description: "Filter upstream tools and inject operating constraints.",
+			Node: Node{
+				Type:   NodeTypePolicy,
+				Label:  "Policy",
+				Inputs: []Port{{ID: "toolset_in", Type: PortTypeToolset, Label: "Tools In", Direction: DirectionInput, Multiple: true}},
+				Outputs: []Port{
+					{ID: "toolset_out", Type: PortTypeToolset, Label: "Tools Out", Direction: DirectionOutput},
+					{ID: "prompt_out", Type: PortTypePrompt, Label: "Prompt", Direction: DirectionOutput},
+				},
+				Config: map[string]any{
+					"allow_tools": []string{},
+					"deny_tools":  []string{"write_file", "edit_file"},
+					"prompt":      "Follow this policy before using tools.",
+				},
+			},
+		},
 	}
 }
 

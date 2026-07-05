@@ -238,6 +238,77 @@ func TestRuntimeUsesBlueprintMemoryNodeWhenEnabled(t *testing.T) {
 	}
 }
 
+func TestRuntimeAppliesBlueprintPolicyToolFilter(t *testing.T) {
+	workdir := t.TempDir()
+	config := testConfig(workdir)
+	config.UseBlueprint = true
+	blueprint := nodeeditor.DefaultBlueprint()
+	blueprint.Nodes = append(blueprint.Nodes, nodeeditor.Node{
+		ID:       "readonly-policy",
+		Type:     nodeeditor.NodeTypePolicy,
+		Label:    "Readonly Policy",
+		Position: nodeeditor.Position{X: 360, Y: 380},
+		Inputs: []nodeeditor.Port{
+			{ID: "toolset_in", Type: nodeeditor.PortTypeToolset, Label: "Tools In", Direction: nodeeditor.DirectionInput, Multiple: true},
+		},
+		Outputs: []nodeeditor.Port{
+			{ID: "toolset_out", Type: nodeeditor.PortTypeToolset, Label: "Tools Out", Direction: nodeeditor.DirectionOutput},
+		},
+		Config: map[string]any{
+			"allow_tools": []string{"read_file", "glob"},
+			"deny_tools":  []string{"glob"},
+		},
+	})
+	blueprint.Edges = []nodeeditor.Edge{
+		{ID: "edge-tools-policy", Source: nodeeditor.Endpoint{Node: "core-tools", Port: "toolset_out"}, Target: nodeeditor.Endpoint{Node: "readonly-policy", Port: "toolset_in"}},
+		{ID: "edge-policy-agent", Source: nodeeditor.Endpoint{Node: "readonly-policy", Port: "toolset_out"}, Target: nodeeditor.Endpoint{Node: "agent-main", Port: "toolset_in"}},
+		{ID: "edge-project-agent", Source: nodeeditor.Endpoint{Node: "project-context", Port: "prompt_out"}, Target: nodeeditor.Endpoint{Node: "agent-main", Port: "prompt_1"}},
+		{ID: "edge-build-agent", Source: nodeeditor.Endpoint{Node: "build-mode", Port: "prompt_out"}, Target: nodeeditor.Endpoint{Node: "agent-main", Port: "prompt_2"}},
+	}
+	if err := nodeeditor.WriteBlueprint(config.DefaultBlueprintPath, blueprint); err != nil {
+		t.Fatal(err)
+	}
+
+	rt := newAgentRuntime(config, nil, nil)
+	got := strings.Join(rt.mainAgentSpec().ToolNames, ",")
+	if got != "read_file" {
+		t.Fatalf("expected filtered policy tools, got %s", got)
+	}
+}
+
+func TestRuntimeInjectsBlueprintPolicyPrompt(t *testing.T) {
+	workdir := t.TempDir()
+	config := testConfig(workdir)
+	config.UseBlueprint = true
+	blueprint := nodeeditor.DefaultBlueprint()
+	blueprint.Nodes = append(blueprint.Nodes, nodeeditor.Node{
+		ID:       "plan-policy",
+		Type:     nodeeditor.NodeTypePolicy,
+		Label:    "Plan Policy",
+		Position: nodeeditor.Position{X: 360, Y: 260},
+		Outputs: []nodeeditor.Port{
+			{ID: "prompt_out", Type: nodeeditor.PortTypePrompt, Label: "Prompt", Direction: nodeeditor.DirectionOutput},
+		},
+		Config: map[string]any{
+			"prompt": "Write a plan before editing files.",
+		},
+	})
+	blueprint.Edges = append(blueprint.Edges, nodeeditor.Edge{
+		ID:     "edge-plan-policy",
+		Source: nodeeditor.Endpoint{Node: "plan-policy", Port: "prompt_out"},
+		Target: nodeeditor.Endpoint{Node: "agent-main", Port: "prompt_3"},
+	})
+	if err := nodeeditor.WriteBlueprint(config.DefaultBlueprintPath, blueprint); err != nil {
+		t.Fatal(err)
+	}
+
+	rt := newAgentRuntime(config, nil, nil)
+	prompt := rt.getSystemPrompt([]string{"read_file"})
+	if !strings.Contains(prompt, "Write a plan before editing files.") {
+		t.Fatalf("expected policy prompt content: %s", prompt)
+	}
+}
+
 func TestRuntimeFallsBackWhenBlueprintDisabled(t *testing.T) {
 	workdir := t.TempDir()
 	config := testConfig(workdir)
