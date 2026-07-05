@@ -96,21 +96,22 @@ func TestParseDisabledModulesNormalizesValues(t *testing.T) {
 
 func testConfig(workdir string) agentConfig {
 	return agentConfig{
-		Model:              "test-model",
-		Workdir:            workdir,
-		CompactDir:         filepath.Join(workdir, ".agents", "compact"),
-		ToolResultsDir:     filepath.Join(workdir, ".agents", "compact", "tool_results"),
-		TranscriptDir:      filepath.Join(workdir, ".agents", "compact", "transcripts"),
-		MemoryDir:          filepath.Join(workdir, ".agents", ".memory"),
-		MemoryIndex:        filepath.Join(workdir, ".agents", ".memory", "MEMORY.md"),
-		TaskDir:            filepath.Join(workdir, ".agents", ".tasks"),
-		TaskIndex:          filepath.Join(workdir, ".agents", ".tasks", "TASKS.md"),
-		ScheduledTasksPath: filepath.Join(workdir, ".scheduled_tasks.json"),
-		TeamDir:            filepath.Join(workdir, ".agents", "team"),
-		TeamMessagesPath:   filepath.Join(workdir, ".agents", "team", "messages.jsonl"),
-		SessionDir:         filepath.Join(workdir, ".agents", "sessions"),
-		ModeConfigPath:     filepath.Join(workdir, ".agents", "modes.json"),
-		BackgroundTimeout:  10 * time.Minute,
+		Model:                "test-model",
+		Workdir:              workdir,
+		CompactDir:           filepath.Join(workdir, ".agents", "compact"),
+		ToolResultsDir:       filepath.Join(workdir, ".agents", "compact", "tool_results"),
+		TranscriptDir:        filepath.Join(workdir, ".agents", "compact", "transcripts"),
+		MemoryDir:            filepath.Join(workdir, ".agents", ".memory"),
+		MemoryIndex:          filepath.Join(workdir, ".agents", ".memory", "MEMORY.md"),
+		TaskDir:              filepath.Join(workdir, ".agents", ".tasks"),
+		TaskIndex:            filepath.Join(workdir, ".agents", ".tasks", "TASKS.md"),
+		ScheduledTasksPath:   filepath.Join(workdir, ".scheduled_tasks.json"),
+		TeamDir:              filepath.Join(workdir, ".agents", "team"),
+		TeamMessagesPath:     filepath.Join(workdir, ".agents", "team", "messages.jsonl"),
+		SessionDir:           filepath.Join(workdir, ".agents", "sessions"),
+		DefaultBlueprintPath: filepath.Join(workdir, ".agents", "blueprints", "agents", "default.json"),
+		ModeConfigPath:       filepath.Join(workdir, ".agents", "modes.json"),
+		BackgroundTimeout:    10 * time.Minute,
 	}
 }
 

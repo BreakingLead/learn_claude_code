@@ -1,6 +1,7 @@
 package agent
 
 import (
+	nodeeditor "bee_agent/internal/agent/node_editor"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -54,6 +55,7 @@ type agentConfig struct {
 	TeamDir               string
 	TeamMessagesPath      string
 	SessionDir            string
+	DefaultBlueprintPath  string
 	ModeConfigPath        string
 	DefaultTokens         int64
 	EscalatedTokens       int64
@@ -91,6 +93,7 @@ func newAgentConfig() (agentConfig, error) {
 		TeamDir:               filepath.Join(workdir, ".agents", "team"),
 		TeamMessagesPath:      filepath.Join(workdir, ".agents", "team", "messages.jsonl"),
 		SessionDir:            filepath.Join(workdir, ".agents", "sessions"),
+		DefaultBlueprintPath:  nodeeditor.DefaultBlueprintPath(workdir),
 		ModeConfigPath:        filepath.Join(workdir, ".agents", "modes.json"),
 		DefaultTokens:         8000,
 		EscalatedTokens:       16000,
@@ -128,6 +131,9 @@ func newAgentRuntime(config agentConfig, events chan<- uiEvent, approvals <-chan
 		rt.team = newTeamRegistry(config.TeamMessagesPath, rt.emitLine)
 	}
 	rt.recovery = newRecoveryState(config)
+	if _, err := nodeeditor.EnsureDefaultBlueprint(config.DefaultBlueprintPath); err != nil {
+		rt.emitLine("[blueprint] default blueprint: %v", err)
+	}
 	rt.modes = newModeRegistry(config.ModeConfigPath, os.Getenv("BEE_AGENT_MODE"), rt.emitLine)
 	rt.sessions = newSessionStore(config.SessionDir)
 	rt.sessionID = rt.sessions.newID(time.Now())
