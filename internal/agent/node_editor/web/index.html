@@ -546,6 +546,19 @@
           }
         }, [selectedNode, updateSelectedNode]);
 
+        const patchSelectedConfig = useCallback((patch) => {
+          if (!selectedNode) return;
+          const config = { ...(selectedNode.config || {}), ...patch };
+          updateSelectedNode({ config });
+          setConfigDraft(JSON.stringify(config, null, 2));
+        }, [selectedNode, updateSelectedNode]);
+
+        const configValue = (key) => {
+          const value = selectedNode?.config?.[key];
+          if (Array.isArray(value)) return value.join(", ");
+          return value == null ? "" : String(value);
+        };
+
         const deleteSelectedNode = useCallback(() => {
           if (!blueprint || !selectedNode || selectedNode.type === "agent") return;
           const next = {
@@ -644,6 +657,53 @@
                         onChange: (event) => updateSelectedNode({ label: event.target.value }),
                       }),
                     ]),
+                    selectedNode.config && Object.prototype.hasOwnProperty.call(selectedNode.config, "source")
+                      ? React.createElement("div", { className: "field", key: "source-field" }, [
+                          React.createElement("label", { key: "label" }, "Source"),
+                          React.createElement("input", {
+                            key: "input",
+                            value: configValue("source"),
+                            placeholder: "inline | skill_file | project_files | active_mode",
+                            onChange: (event) => patchSelectedConfig({ source: event.target.value }),
+                          }),
+                        ])
+                      : null,
+                    selectedNode.config && Object.prototype.hasOwnProperty.call(selectedNode.config, "path")
+                      ? React.createElement("div", { className: "field", key: "path-field" }, [
+                          React.createElement("label", { key: "label" }, "Path"),
+                          React.createElement("input", {
+                            key: "input",
+                            value: configValue("path"),
+                            placeholder: ".agents/skills/name/SKILL.md",
+                            onChange: (event) => patchSelectedConfig({ path: event.target.value }),
+                          }),
+                        ])
+                      : null,
+                    selectedNode.config && Object.prototype.hasOwnProperty.call(selectedNode.config, "prompt")
+                      ? React.createElement("div", { className: "field", key: "prompt-field" }, [
+                          React.createElement("label", { key: "label" }, "Prompt"),
+                          React.createElement("textarea", {
+                            className: "config-editor",
+                            key: "textarea",
+                            value: configValue("prompt"),
+                            spellCheck: "false",
+                            onChange: (event) => patchSelectedConfig({ prompt: event.target.value }),
+                          }),
+                        ])
+                      : null,
+                    selectedNode.config && Object.prototype.hasOwnProperty.call(selectedNode.config, "tools")
+                      ? React.createElement("div", { className: "field", key: "tools-field" }, [
+                          React.createElement("label", { key: "label" }, "Tools"),
+                          React.createElement("input", {
+                            key: "input",
+                            value: configValue("tools"),
+                            placeholder: "read_file, glob",
+                            onChange: (event) => patchSelectedConfig({
+                              tools: event.target.value.split(",").map((item) => item.trim()).filter(Boolean),
+                            }),
+                          }),
+                        ])
+                      : null,
                     React.createElement("div", { className: "field", key: "config" }, [
                       React.createElement("label", { key: "label" }, "Config JSON"),
                       React.createElement("textarea", {
