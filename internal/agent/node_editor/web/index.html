@@ -800,7 +800,10 @@
             if (result.ok) {
               const tools = result.capabilities?.tool_names || [];
               const preview = tools.slice(0, 5).join(", ");
-              const diagnostics = result.capabilities?.diagnostics || [];
+              const diagnostics = [
+                ...(result.diagnostics || []),
+                ...(result.capabilities?.diagnostics || []),
+              ];
               const diagText = diagnostics.length > 0 ? `; diagnostics(${diagnostics.length})` : "";
               setStatus(`valid: ${result.resolved.id}; tools(${tools.length}) ${preview}${diagText}`);
             } else {
@@ -822,7 +825,10 @@
             ]);
           }
           const tools = validationResult.capabilities?.tool_names || [];
-          const diagnostics = validationResult.capabilities?.diagnostics || [];
+          const diagnostics = [
+            ...(validationResult.diagnostics || []),
+            ...(validationResult.capabilities?.diagnostics || []),
+          ];
           const policies = validationResult.capabilities?.policies || [];
           const promptBlocks = validationResult.prompt_blocks || [];
           const runtimeCommand = validationResult.runtime?.command || "";
@@ -869,7 +875,7 @@
               ? React.createElement("div", { className: "diagnostics", key: "diagnostics" },
                   diagnostics.map((item, index) => React.createElement("div", { key: `diagnostic-${index}` }, item))
                 )
-              : React.createElement("div", { className: "muted", key: "no-diagnostics" }, "No capability diagnostics."),
+              : React.createElement("div", { className: "muted", key: "no-diagnostics" }, "No diagnostics."),
           ]);
         };
 

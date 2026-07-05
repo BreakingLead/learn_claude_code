@@ -58,6 +58,7 @@ type BlueprintRuntimeSelector struct {
 type BlueprintValidationResponse struct {
 	OK           bool                     `json:"ok"`
 	Error        string                   `json:"error,omitempty"`
+	Diagnostics  []string                 `json:"diagnostics,omitempty"`
 	Resolved     ResolvedAgentDefinition  `json:"resolved,omitempty"`
 	Expanded     Blueprint                `json:"expanded,omitempty"`
 	Capabilities CapabilityResolution     `json:"capabilities,omitempty"`
@@ -202,6 +203,7 @@ func (s *Store) ValidateBlueprintForRuntime(blueprint Blueprint) BlueprintValida
 	}
 	return BlueprintValidationResponse{
 		OK:           true,
+		Diagnostics:  ConfigDiagnostics(expanded, resolved),
 		Resolved:     resolved,
 		Expanded:     expanded,
 		Capabilities: EffectiveToolNames(expanded, resolved),

@@ -75,6 +75,9 @@ func TestServerBlueprintAPI(t *testing.T) {
 	if len(validation.PromptBlocks) == 0 || validation.PromptBlocks[0].NodeID != "project-context" {
 		t.Fatalf("expected prompt preview blocks, got %+v", validation.PromptBlocks)
 	}
+	if len(validation.Diagnostics) != 0 {
+		t.Fatalf("expected no default config diagnostics, got %+v", validation.Diagnostics)
+	}
 	if validation.Runtime.ID != "default" || !strings.Contains(validation.Runtime.Command, "BEE_AGENT_BLUEPRINT_ID=default") {
 		t.Fatalf("expected runtime selector, got %+v", validation.Runtime)
 	}
@@ -139,6 +142,9 @@ func TestStoreValidateBlueprintForRuntime(t *testing.T) {
 	}
 	if len(response.PromptBlocks) == 0 {
 		t.Fatalf("expected prompt preview blocks, got %+v", response.PromptBlocks)
+	}
+	if len(response.Diagnostics) != 0 {
+		t.Fatalf("expected no default config diagnostics, got %+v", response.Diagnostics)
 	}
 }
 

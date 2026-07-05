@@ -278,3 +278,35 @@ func TestPromptPreviewIncludesOrderedPromptAndMemoryNodes(t *testing.T) {
 		t.Fatalf("unexpected memory preview: %+v", blocks[3])
 	}
 }
+
+func TestConfigDiagnosticsReportsNodeConfigurationWarnings(t *testing.T) {
+	blueprint := DefaultBlueprint()
+	blueprint.Nodes[1].Config = map[string]any{"source": "inline", "prompt": ""}
+	blueprint.Nodes[3].Config = map[string]any{"tools": []string{}}
+	blueprint.Nodes = append(blueprint.Nodes, Node{
+		ID:       "policy",
+		Type:     NodeTypePolicy,
+		Label:    "Policy",
+		Position: Position{X: 300, Y: 380},
+		Inputs:   []Port{{ID: "toolset_in", Type: PortTypeToolset, Label: "Tools In", Direction: DirectionInput, Multiple: true}},
+		Outputs:  []Port{{ID: "toolset_out", Type: PortTypeToolset, Label: "Tools Out", Direction: DirectionOutput}},
+		Config: map[string]any{
+			"allow_tools": []string{"write_file"},
+			"deny_tools":  []string{"write_file"},
+		},
+	})
+	resolved, err := Resolve(blueprint)
+	if err != nil {
+		t.Fatal(err)
+	}
+	diagnostics := strings.Join(ConfigDiagnostics(blueprint, resolved), "\n")
+	for _, want := range []string{
+		"inline prompt is empty",
+		"toolset has no tools",
+		"write_file appears in both allow_tools and deny_tools",
+	} {
+		if !strings.Contains(diagnostics, want) {
+			t.Fatalf("expected diagnostic %q in:\n%s", want, diagnostics)
+		}
+	}
+}
