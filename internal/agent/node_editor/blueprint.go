@@ -121,14 +121,13 @@ func DefaultBlueprint() Blueprint {
 			{
 				ID:       "build-mode",
 				Type:     NodeTypePrompt,
-				Label:    "Build Mode",
+				Label:    "Active Mode",
 				Position: Position{X: 120, Y: 220},
 				Outputs: []Port{
 					{ID: "prompt_out", Type: PortTypePrompt, Label: "Prompt", Direction: DirectionOutput},
 				},
 				Config: map[string]any{
-					"source": "inline",
-					"prompt": "You are in build mode. Implement requested changes directly when the user asks for code changes. Use tools pragmatically, verify focused changes, and keep edits scoped.",
+					"source": "active_mode",
 				},
 			},
 			{

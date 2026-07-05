@@ -9,8 +9,8 @@
 
 ## Phase 2: Runtime Assembly
 
-- Map resolved prompt nodes into ordered prompt blocks.
-- Map resolved toolset nodes into tool definitions and handlers.
+- Map resolved prompt nodes into ordered prompt blocks. Initial support is available behind `BEE_AGENT_USE_BLUEPRINT=1`.
+- Map resolved toolset nodes into tool definitions and handlers. Initial support is available behind `BEE_AGENT_USE_BLUEPRINT=1`.
 - Rework mode and policy behavior into Capability Transformer nodes where practical.
 - Keep existing hard-coded runtime behavior as fallback until default Blueprint parity is proven.
 

@@ -115,6 +115,14 @@ BEE_AGENT_NODE_EDITOR=1 go run ./cmd/bee-agent
 
 默认地址是 `http://127.0.0.1:8787`，可以用 `BEE_AGENT_NODE_EDITOR_ADDR=:8787` 修改。当前 Web UI 支持查看默认图、编辑 JSON、保存和校验；后续会继续接入完整节点编辑交互。
 
+实验性 runtime assembly：
+
+```bash
+BEE_AGENT_USE_BLUEPRINT=1 go run ./cmd/bee-agent
+```
+
+启用后，主 agent 会从默认 Blueprint 解析 prompt 顺序和 toolset；未启用时仍使用现有模块装配逻辑。
+
 ## 消息平台中间层
 
 `messaging` 模块把外部平台 payload 统一为 `UnifiedMessage` 风格的数据：`platform`、`chat_id`、`sender_id`、`sender_name`、`text`、`message_type`、`timestamp`、`metadata`。当前内置 adapter：

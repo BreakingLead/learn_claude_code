@@ -34,6 +34,7 @@ type agentRuntime struct {
 	team        *teamRegistry
 	modes       *modeRegistry
 	sessions    *sessionStore
+	blueprint   *runtimeBlueprint
 	sessionID   string
 	promptCache promptCache
 	memoryTurns int
@@ -56,6 +57,7 @@ type agentConfig struct {
 	TeamMessagesPath      string
 	SessionDir            string
 	DefaultBlueprintPath  string
+	UseBlueprint          bool
 	ModeConfigPath        string
 	DefaultTokens         int64
 	EscalatedTokens       int64
@@ -94,6 +96,7 @@ func newAgentConfig() (agentConfig, error) {
 		TeamMessagesPath:      filepath.Join(workdir, ".agents", "team", "messages.jsonl"),
 		SessionDir:            filepath.Join(workdir, ".agents", "sessions"),
 		DefaultBlueprintPath:  nodeeditor.DefaultBlueprintPath(workdir),
+		UseBlueprint:          truthyEnv("BEE_AGENT_USE_BLUEPRINT"),
 		ModeConfigPath:        filepath.Join(workdir, ".agents", "modes.json"),
 		DefaultTokens:         8000,
 		EscalatedTokens:       16000,
@@ -135,6 +138,7 @@ func newAgentRuntime(config agentConfig, events chan<- uiEvent, approvals <-chan
 		rt.emitLine("[blueprint] default blueprint: %v", err)
 	}
 	rt.modes = newModeRegistry(config.ModeConfigPath, os.Getenv("BEE_AGENT_MODE"), rt.emitLine)
+	rt.blueprint = rt.loadRuntimeBlueprint()
 	rt.sessions = newSessionStore(config.SessionDir)
 	rt.sessionID = rt.sessions.newID(time.Now())
 	rt.todo = &todoModule{}

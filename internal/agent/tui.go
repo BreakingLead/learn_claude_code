@@ -765,6 +765,7 @@ func (m tuiModel) renderRuntimeDebug() string {
 		"activeTab":         m.activeTabName(),
 		"mode":              m.rt.activeMode(),
 		"modeRegistry":      m.rt.modes.snapshot(),
+		"blueprint":         m.rt.blueprintSnapshot(),
 		"messageCount":      len(m.history),
 		"logCount":          len(m.logs),
 		"memoryTurns":       m.rt.memoryTurns,

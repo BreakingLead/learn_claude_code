@@ -80,7 +80,7 @@
     {
       "id": "build-mode",
       "type": "prompt",
-      "label": "Build Mode",
+      "label": "Active Mode",
       "position": {
         "x": 120,
         "y": 220
@@ -94,8 +94,7 @@
         }
       ],
       "config": {
-        "source": "inline",
-        "prompt": "You are in build mode. Implement requested changes directly when the user asks for code changes. Use tools pragmatically, verify focused changes, and keep edits scoped."
+        "source": "active_mode"
       }
     },
     {
