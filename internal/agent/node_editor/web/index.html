@@ -392,6 +392,81 @@
         return `${prefix}-${Date.now()}`;
       }
 
+      function endpointKey(endpoint) {
+        return `${endpoint.node}:${endpoint.port}`;
+      }
+
+      function compositePortQueues(mappings) {
+        const result = new Map();
+        (mappings || []).forEach((mapping) => {
+          const key = endpointKey(mapping.endpoint);
+          const ports = result.get(key) || [];
+          ports.push(mapping.port.id);
+          result.set(key, ports);
+        });
+        return result;
+      }
+
+      function takeMappedPort(queues, endpoint) {
+        const ports = queues.get(endpointKey(endpoint)) || [];
+        return ports.length > 1 ? ports.shift() : ports[0];
+      }
+
+      function wrapSelectionWithComposite(blueprint, nodeIDs, composite) {
+        const selected = new Set(nodeIDs);
+        if (selected.has(blueprint.root_agent)) {
+          return { blueprint, error: "root agent cannot be replaced by a composite node" };
+        }
+        const selectedNodes = (blueprint.nodes || []).filter((node) => selected.has(node.id));
+        if (selectedNodes.length === 0) {
+          return { blueprint, error: "selection is empty" };
+        }
+        const minX = Math.min(...selectedNodes.map((node) => node.position?.x || 0));
+        const minY = Math.min(...selectedNodes.map((node) => node.position?.y || 0));
+        const compositeNodeID = nextNodeId(blueprint, slug(composite.id || "composite"));
+        const inputQueues = compositePortQueues(composite.inputs);
+        const outputQueues = compositePortQueues(composite.outputs);
+        const rewiredEdges = [];
+        for (const edge of blueprint.edges || []) {
+          const sourceSelected = selected.has(edge.source.node);
+          const targetSelected = selected.has(edge.target.node);
+          if (sourceSelected && targetSelected) continue;
+          if (!sourceSelected && targetSelected) {
+            const targetPort = takeMappedPort(inputQueues, edge.target);
+            if (!targetPort) return { blueprint, error: `missing composite input for ${endpointKey(edge.target)}` };
+            rewiredEdges.push({ ...edge, target: { node: compositeNodeID, port: targetPort } });
+            continue;
+          }
+          if (sourceSelected && !targetSelected) {
+            const sourcePort = takeMappedPort(outputQueues, edge.source);
+            if (!sourcePort) return { blueprint, error: `missing composite output for ${endpointKey(edge.source)}` };
+            rewiredEdges.push({ ...edge, source: { node: compositeNodeID, port: sourcePort } });
+            continue;
+          }
+          rewiredEdges.push(edge);
+        }
+        const compositeNode = {
+          id: compositeNodeID,
+          type: "composite",
+          label: composite.name || composite.id,
+          position: { x: minX, y: minY },
+          inputs: (composite.inputs || []).map((mapping) => mapping.port),
+          outputs: (composite.outputs || []).map((mapping) => mapping.port),
+          config: { definition: composite.id },
+        };
+        return {
+          blueprint: {
+            ...blueprint,
+            nodes: [
+              ...(blueprint.nodes || []).filter((node) => !selected.has(node.id)),
+              compositeNode,
+            ],
+            edges: rewiredEdges,
+          },
+          nodeID: compositeNodeID,
+        };
+      }
+
       const fallbackTemplates = [
         { type: "prompt", label: "Prompt", node: { type: "prompt", label: "Prompt", outputs: [{ id: "prompt_out", type: "prompt", label: "Prompt", direction: "output" }], config: { source: "inline", prompt: "Write prompt text here." } } },
         { type: "skill", label: "Skill", node: { type: "skill", label: "Skill", outputs: [{ id: "prompt_out", type: "prompt", label: "Prompt", direction: "output" }], config: { source: "inline", prompt: "Write skill instructions here." } } },
@@ -618,7 +693,14 @@
               return;
             }
             await loadTemplates();
-            setStatus(`created composite: ${result.composite.id}`);
+            const wrapped = wrapSelectionWithComposite(next, nodeIDs, result.composite);
+            if (wrapped.error) {
+              setStatus(`created composite: ${result.composite.id}; ${wrapped.error}`);
+              return;
+            }
+            updateDocument(wrapped.blueprint, `created composite: ${result.composite.id}`);
+            setSelectedNodeId(wrapped.nodeID);
+            setSelectedNodeIds([wrapped.nodeID]);
           } catch (error) {
             setStatus(`composite failed: ${error.message}`);
           }
