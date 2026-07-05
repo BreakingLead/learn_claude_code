@@ -28,6 +28,39 @@ func TestDefaultBlueprintValidatesAndResolves(t *testing.T) {
 	}
 }
 
+func TestAgentTemplateCanBecomeRootAgent(t *testing.T) {
+	var template NodeTemplate
+	for _, item := range BuiltinNodeTemplates() {
+		if item.Type == NodeTypeAgent {
+			template = item
+			break
+		}
+	}
+	if template.Type == "" {
+		t.Fatal("missing agent template")
+	}
+	blueprint := DefaultBlueprint()
+	node := template.Node
+	node.ID = "agent-reviewer"
+	node.Label = "Reviewer"
+	node.Position = Position{X: 620, Y: 420}
+	blueprint.Nodes = append(blueprint.Nodes, node)
+	blueprint.RootAgent = node.ID
+	blueprint.Edges = append(blueprint.Edges, Edge{
+		ID:     "edge-project-reviewer",
+		Source: Endpoint{Node: "project-context", Port: "prompt_out"},
+		Target: Endpoint{Node: node.ID, Port: "prompt_1"},
+	})
+
+	resolved, err := Resolve(blueprint)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved.ID != node.ID || strings.Join(resolved.PromptNodes, ",") != "project-context" {
+		t.Fatalf("unexpected resolved agent: %+v", resolved)
+	}
+}
+
 func TestExampleAgentBlueprintsValidateAndResolve(t *testing.T) {
 	paths, err := filepath.Glob(filepath.Join("..", "..", "..", ".agents", "blueprints", "agents", "*.json"))
 	if err != nil {

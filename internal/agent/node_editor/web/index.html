@@ -511,6 +511,7 @@
       }
 
       const fallbackTemplates = [
+        { type: "agent", label: "Agent", node: { type: "agent", label: "Agent", inputs: [{ id: "prompt_1", type: "prompt", label: "Prompt 1", direction: "input", order: 1 }, { id: "toolset_in", type: "toolset", label: "Tools", direction: "input", multiple: true }, { id: "memory_in", type: "memory", label: "Memory", direction: "input", multiple: true }], outputs: [{ id: "output", type: "output", label: "Output", direction: "output" }], config: { display_name: "Agent" } } },
         { type: "prompt", label: "Prompt", node: { type: "prompt", label: "Prompt", outputs: [{ id: "prompt_out", type: "prompt", label: "Prompt", direction: "output" }], config: { source: "inline", prompt: "Write prompt text here." } } },
         { type: "skill", label: "Skill", node: { type: "skill", label: "Skill", outputs: [{ id: "prompt_out", type: "prompt", label: "Prompt", direction: "output" }], config: { source: "inline", prompt: "Write skill instructions here." } } },
         { type: "toolset", label: "Toolset", node: { type: "toolset", label: "Toolset", outputs: [{ id: "toolset_out", type: "toolset", label: "Toolset", direction: "output" }], config: { tools: ["read_file", "glob"] } } },
@@ -732,7 +733,7 @@
         };
 
         const deleteSelectedNode = useCallback(() => {
-          if (!blueprint || !selectedNode || selectedNode.type === "agent") return;
+          if (!blueprint || !selectedNode || selectedNode.id === blueprint.root_agent) return;
           const next = {
             ...blueprint,
             nodes: (blueprint.nodes || []).filter((node) => node.id !== selectedNode.id),
@@ -743,6 +744,11 @@
           updateDocument(next, "node removed");
           setSelectedNodeId("");
           setSelectedNodeIds([]);
+        }, [blueprint, selectedNode, updateDocument]);
+
+        const setSelectedAgentAsRoot = useCallback(() => {
+          if (!blueprint || !selectedNode || selectedNode.type !== "agent") return;
+          updateDocument({ ...blueprint, root_agent: selectedNode.id }, `root agent: ${selectedNode.id}`);
         }, [blueprint, selectedNode, updateDocument]);
 
         const createComposite = async () => {
@@ -1072,6 +1078,21 @@
                         onChange: (event) => updateSelectedNode({ label: event.target.value }),
                       }),
                     ]),
+                    selectedNode.type === "agent"
+                      ? React.createElement("div", { className: "field", key: "root-agent" }, [
+                          React.createElement("label", { key: "label" }, "Root Agent"),
+                          React.createElement("div", { className: "actions", key: "actions" }, [
+                            React.createElement("span", { className: "muted", key: "state" },
+                              blueprint.root_agent === selectedNode.id ? "Current root" : blueprint.root_agent || "(none)"
+                            ),
+                            React.createElement("button", {
+                              key: "set-root",
+                              disabled: blueprint.root_agent === selectedNode.id,
+                              onClick: setSelectedAgentAsRoot,
+                            }, "Set Root"),
+                          ]),
+                        ])
+                      : null,
                     selectedNode.config && Object.prototype.hasOwnProperty.call(selectedNode.config, "source")
                       ? React.createElement("div", { className: "field", key: "source-field" }, [
                           React.createElement("label", { key: "label" }, "Source"),
@@ -1155,8 +1176,8 @@
                         onChange: (event) => updateSelectedConfig(event.target.value),
                       }),
                     ]),
-                    selectedNode.type === "agent"
-                      ? React.createElement("div", { className: "muted", key: "agent-note" }, "Agent nodes cannot be deleted.")
+                    selectedNode.id === blueprint.root_agent
+                      ? React.createElement("div", { className: "muted", key: "agent-note" }, "Root agent cannot be deleted.")
                       : React.createElement("button", { key: "delete", onClick: deleteSelectedNode }, "Delete Node"),
                   ]
                 : [React.createElement("div", { className: "muted", key: "empty-selection" }, "Select a node to edit its label and config.")])

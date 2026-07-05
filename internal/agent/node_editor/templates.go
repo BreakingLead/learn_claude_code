@@ -10,6 +10,22 @@ type NodeTemplate struct {
 func BuiltinNodeTemplates() []NodeTemplate {
 	return []NodeTemplate{
 		{
+			Type:        NodeTypeAgent,
+			Label:       "Agent",
+			Description: "An agent definition with ordered prompt inputs, toolset input, and memory input.",
+			Node: Node{
+				Type:  NodeTypeAgent,
+				Label: "Agent",
+				Inputs: []Port{
+					{ID: "prompt_1", Type: PortTypePrompt, Label: "Prompt 1", Direction: DirectionInput, Order: 1},
+					{ID: "toolset_in", Type: PortTypeToolset, Label: "Tools", Direction: DirectionInput, Multiple: true},
+					{ID: "memory_in", Type: PortTypeMemory, Label: "Memory", Direction: DirectionInput, Multiple: true},
+				},
+				Outputs: []Port{{ID: "output", Type: PortTypeOutput, Label: "Output", Direction: DirectionOutput}},
+				Config:  map[string]any{"display_name": "Agent"},
+			},
+		},
+		{
 			Type:        NodeTypePrompt,
 			Label:       "Prompt",
 			Description: "Inline prompt or context block.",
