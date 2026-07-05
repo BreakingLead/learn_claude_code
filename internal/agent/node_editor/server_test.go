@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -478,6 +479,46 @@ func TestServerWorkflowCompileAPI(t *testing.T) {
 	}
 	if len(payload.Plan.Outputs) != 1 || payload.Plan.Outputs[0].NodeID != "output" {
 		t.Fatalf("unexpected compiled outputs: %+v", payload.Plan.Outputs)
+	}
+}
+
+func TestServerSaveCompiledWorkflowPlanAPI(t *testing.T) {
+	workdir := t.TempDir()
+	if _, err := EnsureDefaultBlueprint(DefaultBlueprintPath(workdir)); err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(NewServer(workdir).Handler())
+	defer server.Close()
+
+	raw, err := json.Marshal(DefaultWorkflow())
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := http.Post(server.URL+"/api/workflows/review-pipeline/compiled-plan", "application/json", bytes.NewReader(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("save compiled plan status = %d", resp.StatusCode)
+	}
+	var payload WorkflowCompiledPlanSaveResponse
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatal(err)
+	}
+	if !payload.OK || payload.Path == "" || payload.Plan.WorkflowID != "review-pipeline" {
+		t.Fatalf("unexpected save payload: %+v", payload)
+	}
+	rawPlan, err := os.ReadFile(payload.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stored WorkflowCompiledPlan
+	if err := json.Unmarshal(rawPlan, &stored); err != nil {
+		t.Fatal(err)
+	}
+	if stored.WorkflowID != "review-pipeline" || len(stored.AgentRuns) != 3 {
+		t.Fatalf("unexpected stored compiled plan: %+v", stored)
 	}
 }
 

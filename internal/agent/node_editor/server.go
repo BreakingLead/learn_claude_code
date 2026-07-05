@@ -98,6 +98,13 @@ type WorkflowCompileResponse struct {
 	Plan  WorkflowCompiledPlan `json:"plan,omitempty"`
 }
 
+type WorkflowCompiledPlanSaveResponse struct {
+	OK    bool                 `json:"ok"`
+	Error string               `json:"error,omitempty"`
+	Path  string               `json:"path,omitempty"`
+	Plan  WorkflowCompiledPlan `json:"plan,omitempty"`
+}
+
 type WorkflowCompiledPlan struct {
 	WorkflowID  string                   `json:"workflow_id"`
 	Name        string                   `json:"name"`
@@ -163,6 +170,10 @@ func (s *Store) WorkflowDir() string {
 	return filepath.Join(s.root, "workflows")
 }
 
+func (s *Store) WorkflowPlanDir() string {
+	return filepath.Join(s.root, "workflow_plans")
+}
+
 func (s *Store) AgentPath(id string) (string, error) {
 	id = safeID(id)
 	if id == "" {
@@ -185,6 +196,14 @@ func (s *Store) WorkflowPath(id string) (string, error) {
 		return "", fmt.Errorf("workflow id is required")
 	}
 	return filepath.Join(s.WorkflowDir(), id+".json"), nil
+}
+
+func (s *Store) WorkflowPlanPath(id string) (string, error) {
+	id = safeID(id)
+	if id == "" {
+		return "", fmt.Errorf("workflow id is required")
+	}
+	return filepath.Join(s.WorkflowPlanDir(), id+".json"), nil
 }
 
 func (s *Store) ListAgents() ([]BlueprintSummary, error) {
@@ -560,6 +579,21 @@ func (s *Store) CompileWorkflow(workflow WorkflowDefinition) (WorkflowCompiledPl
 	return plan, nil
 }
 
+func (s *Store) SaveCompiledWorkflowPlan(workflow WorkflowDefinition) (WorkflowCompiledPlan, string, error) {
+	plan, err := s.CompileWorkflow(workflow)
+	if err != nil {
+		return WorkflowCompiledPlan{}, "", err
+	}
+	path, err := s.WorkflowPlanPath(workflow.ID)
+	if err != nil {
+		return WorkflowCompiledPlan{}, "", err
+	}
+	if err := writeCompiledWorkflowPlan(path, plan); err != nil {
+		return WorkflowCompiledPlan{}, "", err
+	}
+	return plan, path, nil
+}
+
 func (s *Store) ValidateWorkflowAgentReferences(workflow WorkflowDefinition) error {
 	for _, node := range workflow.Nodes {
 		if node.Type != WorkflowNodeTypeAgent {
@@ -653,6 +687,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/workflows/{id}/validate", s.handleValidateWorkflow)
 	mux.HandleFunc("POST /api/workflows/{id}/simulate", s.handleSimulateWorkflow)
 	mux.HandleFunc("POST /api/workflows/{id}/compile", s.handleCompileWorkflow)
+	mux.HandleFunc("POST /api/workflows/{id}/compiled-plan", s.handleSaveCompiledWorkflowPlan)
 	static, _ := fs.Sub(webFS, "web")
 	mux.Handle("GET /", http.FileServer(http.FS(static)))
 	return mux
@@ -878,6 +913,24 @@ func (s *Server) handleCompileWorkflow(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, WorkflowCompileResponse{OK: true, Plan: plan})
 }
 
+func (s *Server) handleSaveCompiledWorkflowPlan(w http.ResponseWriter, r *http.Request) {
+	workflow, err := decodeWorkflow(r.Body)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, WorkflowCompiledPlanSaveResponse{OK: false, Error: err.Error()})
+		return
+	}
+	if safeID(workflow.ID) != safeID(r.PathValue("id")) {
+		writeJSON(w, http.StatusBadRequest, WorkflowCompiledPlanSaveResponse{OK: false, Error: "workflow id does not match route id"})
+		return
+	}
+	plan, path, err := s.store.SaveCompiledWorkflowPlan(workflow)
+	if err != nil {
+		writeJSON(w, http.StatusOK, WorkflowCompiledPlanSaveResponse{OK: false, Error: err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, WorkflowCompiledPlanSaveResponse{OK: true, Path: path, Plan: plan})
+}
+
 func decodeBlueprint(body io.Reader) (Blueprint, error) {
 	defer io.Copy(io.Discard, body)
 	var blueprint Blueprint
@@ -989,4 +1042,16 @@ func compileWorkflowRunOutputs(ports []Port, edges []Edge) []WorkflowCompiledRun
 		})
 	}
 	return outputs
+}
+
+func writeCompiledWorkflowPlan(path string, plan WorkflowCompiledPlan) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	raw, err := json.MarshalIndent(plan, "", "  ")
+	if err != nil {
+		return err
+	}
+	raw = append(raw, '\n')
+	return os.WriteFile(path, raw, 0o644)
 }

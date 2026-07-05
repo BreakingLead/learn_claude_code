@@ -604,6 +604,7 @@
         const [workflowValidationResult, setWorkflowValidationResult] = useState(null);
         const [workflowSimulationResult, setWorkflowSimulationResult] = useState(null);
         const [workflowCompileResult, setWorkflowCompileResult] = useState(null);
+        const [compiledPlanPath, setCompiledPlanPath] = useState("");
         const [workflowSimulationInput, setWorkflowSimulationInput] = useState("Describe the change you want this workflow to handle.");
         const selectedWorkflowNode = (() => {
           if (editorMode !== "workflow" || !selectedNodeId || !workflowSource.trim()) return null;
@@ -638,6 +639,7 @@
           setWorkflowValidationResult(null);
           setWorkflowSimulationResult(null);
           setWorkflowCompileResult(null);
+          setCompiledPlanPath("");
           if (message) setStatus(message);
         }, [setEdges, setNodes]);
 
@@ -887,6 +889,7 @@
           setWorkflowValidationResult(null);
           setWorkflowSimulationResult(null);
           setWorkflowCompileResult(null);
+          setCompiledPlanPath("");
           try {
             const next = JSON.parse(raw);
             setNodes(toFlowNodes(next));
@@ -1292,6 +1295,27 @@
           }
         };
 
+        const saveCompiledWorkflowPlan = async () => {
+          try {
+            const next = JSON.parse(workflowSource);
+            const response = await fetch(`/api/workflows/${next.id}/compiled-plan`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(next),
+            });
+            const result = await response.json();
+            setWorkflowCompileResult(result);
+            if (!response.ok || !result.ok) {
+              setStatus(`compiled plan save failed: ${result.error || response.statusText}`);
+              return;
+            }
+            setCompiledPlanPath(result.path || "");
+            setStatus(`compiled plan saved: ${result.path || "(unknown path)"}`);
+          } catch (error) {
+            setStatus(`compiled plan save failed: ${error.message}`);
+          }
+        };
+
         const renderWorkflowValidationResult = () => {
           if (!workflowValidationResult) return null;
           if (!workflowValidationResult.ok) {
@@ -1433,6 +1457,9 @@
           const runs = plan.agent_runs || [];
           return React.createElement("div", { className: "validation", key: "workflow-compile" }, [
             React.createElement("div", { className: "validation-title", key: "title" }, "Compiled workflow"),
+            compiledPlanPath
+              ? React.createElement("div", { className: "muted", key: "path" }, `saved: ${compiledPlanPath}`)
+              : null,
             React.createElement("div", { className: "muted", key: "order" }, `order: ${(plan.order || []).join(" -> ") || "(empty)"}`),
             (plan.diagnostics || []).length > 0
               ? React.createElement("div", { className: "diagnostics", key: "diagnostics" },
@@ -1674,6 +1701,13 @@
                         disabled: !workflowSource.trim(),
                         onClick: compileWorkflow,
                       }, "Compile Workflow")
+                    : null,
+                  editorMode === "workflow"
+                    ? React.createElement("button", {
+                        key: "save-compiled-workflow",
+                        disabled: !workflowSource.trim(),
+                        onClick: saveCompiledWorkflowPlan,
+                      }, "Save Plan")
                     : null,
                   editorMode === "workflow"
                     ? React.createElement("button", {
