@@ -568,6 +568,14 @@
           setSelectedNodeIds((ids) => ids.filter((id) => (next.nodes || []).some((node) => node.id === id)));
         }, [updateDocument]);
 
+        const updateWorkflowDocument = useCallback((next, message) => {
+          setWorkflowSource(JSON.stringify(next, null, 2));
+          setNodes(toFlowNodes(next));
+          setEdges(toFlowEdges(next));
+          setValidationResult(null);
+          if (message) setStatus(message);
+        }, [setEdges, setNodes]);
+
         const loadBlueprint = useCallback(async (id) => {
           const response = await fetch(`/api/blueprints/${id}`);
           const data = await response.json();
@@ -612,10 +620,10 @@
           const data = await response.json();
           if (!response.ok) throw new Error(data.error || response.statusText);
           setActiveWorkflowId(data.id);
-          setWorkflowSource(JSON.stringify(data, null, 2));
+          updateWorkflowDocument(data);
           setEditorMode("workflow");
           setStatus(`loaded workflow ${data.id}`);
-        }, []);
+        }, [updateWorkflowDocument]);
 
         const loadTemplates = useCallback(async () => {
           try {
@@ -645,9 +653,10 @@
         }, [selectedNodeId]);
 
         const validConnection = useCallback((connection) => {
+          if (editorMode === "workflow") return false;
           if (!blueprint) return false;
           return connectionError(blueprint, edges, connection) === "";
-        }, [blueprint, edges]);
+        }, [blueprint, edges, editorMode]);
 
         const parseSource = () => {
           const next = JSON.parse(source);
@@ -667,6 +676,10 @@
         }, [blueprint, updateDocument]);
 
         const connect = useCallback((connection) => {
+          if (editorMode === "workflow") {
+            setStatus("workflow graph connections are edited in JSON for now");
+            return;
+          }
           if (!blueprint) return;
           const error = connectionError(blueprint, edges, connection);
           if (error) {
@@ -680,9 +693,26 @@
           });
           updateDocument(next);
           setStatus("connected");
-        }, [blueprint, edges, updateDocument]);
+        }, [blueprint, edges, editorMode, updateDocument]);
 
         const updateNodePosition = useCallback((_, node) => {
+          if (editorMode === "workflow") {
+            try {
+              const workflow = JSON.parse(workflowSource);
+              const next = {
+                ...workflow,
+                nodes: (workflow.nodes || []).map((item) =>
+                  item.id === node.id
+                    ? { ...item, position: { x: Math.round(node.position.x), y: Math.round(node.position.y) } }
+                    : item
+                ),
+              };
+              updateWorkflowDocument(next);
+            } catch (error) {
+              setStatus(`workflow position failed: ${error.message}`);
+            }
+            return;
+          }
           if (!blueprint) return;
           const next = {
             ...blueprint,
@@ -694,9 +724,13 @@
           };
           setBlueprint(next);
           setSource(JSON.stringify(next, null, 2));
-        }, [blueprint]);
+        }, [blueprint, editorMode, updateWorkflowDocument, workflowSource]);
 
         const deleteEdges = useCallback((deleted) => {
+          if (editorMode === "workflow") {
+            setStatus("workflow graph edges are edited in JSON for now");
+            return;
+          }
           if (!blueprint || deleted.length === 0) return;
           const deletedIDs = new Set(deleted.map((edge) => edge.id));
           const next = {
@@ -706,7 +740,7 @@
           setBlueprint(next);
           setSource(JSON.stringify(next, null, 2));
           setStatus("edge removed");
-        }, [blueprint]);
+        }, [blueprint, editorMode]);
 
         const selectNode = useCallback((_, node) => {
           setSelectedNodeId(node.id);
@@ -754,6 +788,17 @@
           return value == null ? "" : String(value);
         };
 
+        const updateWorkflowSource = useCallback((raw) => {
+          setWorkflowSource(raw);
+          try {
+            const next = JSON.parse(raw);
+            setNodes(toFlowNodes(next));
+            setEdges(toFlowEdges(next));
+          } catch {
+            // Keep the user's invalid draft in the editor; validation will report the parse error.
+          }
+        }, [setEdges, setNodes]);
+
         const deleteSelectedNode = useCallback(() => {
           if (!blueprint || !selectedNode || selectedNode.id === blueprint.root_agent) return;
           const next = {
@@ -772,6 +817,14 @@
           if (!blueprint || !selectedNode || selectedNode.type !== "agent") return;
           updateDocument({ ...blueprint, root_agent: selectedNode.id }, `root agent: ${selectedNode.id}`);
         }, [blueprint, selectedNode, updateDocument]);
+
+        const openBlueprintPanel = useCallback(() => {
+          setEditorMode("blueprint");
+          if (blueprint) {
+            setNodes(toFlowNodes(blueprint));
+            setEdges(toFlowEdges(blueprint));
+          }
+        }, [blueprint, setEdges, setNodes]);
 
         const createComposite = async () => {
           try {
@@ -1130,7 +1183,7 @@
                   React.createElement("button", {
                     key: "blueprint-mode",
                     disabled: editorMode === "blueprint",
-                    onClick: () => setEditorMode("blueprint"),
+                    onClick: openBlueprintPanel,
                   }, "Blueprint"),
                   React.createElement("button", {
                     key: "composite-mode",
@@ -1344,7 +1397,7 @@
                     key: "workflow-editor",
                     value: workflowSource,
                     spellCheck: "false",
-                    onChange: (event) => setWorkflowSource(event.target.value),
+                    onChange: (event) => updateWorkflowSource(event.target.value),
                   })
                 : React.createElement("textarea", {
                     className: "json-editor",
