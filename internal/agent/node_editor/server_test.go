@@ -59,11 +59,7 @@ func TestServerBlueprintAPI(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer resp.Body.Close()
-	var validation struct {
-		OK           bool                 `json:"ok"`
-		Capabilities CapabilityResolution `json:"capabilities"`
-		Runtime      BlueprintRuntimeSelector
-	}
+	var validation BlueprintValidationResponse
 	if err := json.NewDecoder(resp.Body).Decode(&validation); err != nil {
 		t.Fatal(err)
 	}
@@ -72,6 +68,9 @@ func TestServerBlueprintAPI(t *testing.T) {
 	}
 	if !validation.Capabilities.Resolved || len(validation.Capabilities.ToolNames) == 0 {
 		t.Fatalf("expected validation capabilities, got %+v", validation.Capabilities)
+	}
+	if validation.Expanded.ID != "default" || validation.Resolved.ID != "agent-main" {
+		t.Fatalf("expected expanded/resolved validation payload, got %+v", validation)
 	}
 	if validation.Runtime.ID != "default" || !strings.Contains(validation.Runtime.Command, "BEE_AGENT_BLUEPRINT_ID=default") {
 		t.Fatalf("expected runtime selector, got %+v", validation.Runtime)
@@ -120,6 +119,20 @@ func TestServerCreateBlueprintAPI(t *testing.T) {
 	}
 	if stored.RootAgent != "agent-main" {
 		t.Fatalf("unexpected stored blueprint: %+v", stored)
+	}
+}
+
+func TestStoreValidateBlueprintForRuntime(t *testing.T) {
+	store := NewStore(t.TempDir())
+	response := store.ValidateBlueprintForRuntime(DefaultBlueprint())
+	if !response.OK {
+		t.Fatalf("expected valid blueprint, got %s", response.Error)
+	}
+	if response.Runtime.ID != "default" {
+		t.Fatalf("unexpected runtime selector: %+v", response.Runtime)
+	}
+	if !response.Capabilities.Resolved || !containsNodeID(response.Capabilities.ToolNames, "read_file") {
+		t.Fatalf("unexpected capabilities: %+v", response.Capabilities)
 	}
 }
 

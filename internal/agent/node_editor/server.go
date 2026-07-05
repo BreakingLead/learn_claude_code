@@ -55,6 +55,15 @@ type BlueprintRuntimeSelector struct {
 	Command string `json:"command"`
 }
 
+type BlueprintValidationResponse struct {
+	OK           bool                     `json:"ok"`
+	Error        string                   `json:"error,omitempty"`
+	Resolved     ResolvedAgentDefinition  `json:"resolved,omitempty"`
+	Expanded     Blueprint                `json:"expanded,omitempty"`
+	Capabilities CapabilityResolution     `json:"capabilities,omitempty"`
+	Runtime      BlueprintRuntimeSelector `json:"runtime,omitempty"`
+}
+
 func NewStore(workdir string) *Store {
 	return &Store{root: filepath.Join(workdir, ".agents", "blueprints")}
 }
@@ -175,6 +184,27 @@ func (s *Store) RuntimeSelector(id string) BlueprintRuntimeSelector {
 		ID:      id,
 		Path:    path,
 		Command: "BEE_AGENT_USE_BLUEPRINT=1 BEE_AGENT_BLUEPRINT_ID=" + id + " go run ./cmd/bee-agent",
+	}
+}
+
+func (s *Store) ValidateBlueprintForRuntime(blueprint Blueprint) BlueprintValidationResponse {
+	expanded, err := ExpandComposites(blueprint, s)
+	if err != nil {
+		return BlueprintValidationResponse{OK: false, Error: err.Error()}
+	}
+	if err := Validate(expanded); err != nil {
+		return BlueprintValidationResponse{OK: false, Error: err.Error()}
+	}
+	resolved, err := Resolve(expanded)
+	if err != nil {
+		return BlueprintValidationResponse{OK: false, Error: err.Error()}
+	}
+	return BlueprintValidationResponse{
+		OK:           true,
+		Resolved:     resolved,
+		Expanded:     expanded,
+		Capabilities: EffectiveToolNames(expanded, resolved),
+		Runtime:      s.RuntimeSelector(blueprint.ID),
 	}
 }
 
@@ -327,32 +357,10 @@ func (s *Server) handlePutBlueprint(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleValidateBlueprint(w http.ResponseWriter, r *http.Request) {
 	blueprint, err := decodeBlueprint(r.Body)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": err.Error()})
+		writeJSON(w, http.StatusBadRequest, BlueprintValidationResponse{OK: false, Error: err.Error()})
 		return
 	}
-	expanded, err := ExpandComposites(blueprint, s.store)
-	if err != nil {
-		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "error": err.Error()})
-		return
-	}
-	if err := Validate(expanded); err != nil {
-		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "error": err.Error()})
-		return
-	}
-	resolved, err := Resolve(expanded)
-	if err != nil {
-		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "error": err.Error()})
-		return
-	}
-	capabilities := EffectiveToolNames(expanded, resolved)
-	runtime := s.store.RuntimeSelector(blueprint.ID)
-	writeJSON(w, http.StatusOK, map[string]any{
-		"ok":           true,
-		"resolved":     resolved,
-		"expanded":     expanded,
-		"capabilities": capabilities,
-		"runtime":      runtime,
-	})
+	writeJSON(w, http.StatusOK, s.store.ValidateBlueprintForRuntime(blueprint))
 }
 
 func (s *Server) handleListComposites(w http.ResponseWriter, r *http.Request) {
