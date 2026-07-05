@@ -823,6 +823,7 @@
           }
           const tools = validationResult.capabilities?.tool_names || [];
           const diagnostics = validationResult.capabilities?.diagnostics || [];
+          const policies = validationResult.capabilities?.policies || [];
           const runtimeCommand = validationResult.runtime?.command || "";
           return React.createElement("div", { className: "validation", key: "validation" }, [
             React.createElement("div", { className: "validation-title", key: "title" },
@@ -840,6 +841,19 @@
                   tools.map((tool) => React.createElement("span", { className: "chip", key: tool }, tool))
                 )
               : React.createElement("div", { className: "muted", key: "no-tools" }, "No tools resolved."),
+            policies.length > 0
+              ? React.createElement("div", { className: "field", key: "policies" }, [
+                  React.createElement("label", { key: "label" }, "Policy trace"),
+                  ...policies.map((policy) => React.createElement("div", { className: "validation", key: policy.node_id }, [
+                    React.createElement("div", { className: "validation-title", key: "title" }, policy.node_id),
+                    React.createElement("div", { className: "muted", key: "input" }, `in: ${(policy.input_tools || []).join(", ") || "(none)"}`),
+                    React.createElement("div", { className: "muted", key: "output" }, `out: ${(policy.output_tools || []).join(", ") || "(none)"}`),
+                    (policy.dropped_tools || []).length > 0
+                      ? React.createElement("div", { className: "diagnostics", key: "dropped" }, `dropped: ${policy.dropped_tools.join(", ")}`)
+                      : React.createElement("div", { className: "muted", key: "dropped" }, "dropped: (none)"),
+                  ])),
+                ])
+              : null,
             diagnostics.length > 0
               ? React.createElement("div", { className: "diagnostics", key: "diagnostics" },
                   diagnostics.map((item, index) => React.createElement("div", { key: `diagnostic-${index}` }, item))

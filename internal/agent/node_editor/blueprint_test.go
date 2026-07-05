@@ -183,6 +183,19 @@ func TestEffectiveToolNamesAppliesPolicyNodes(t *testing.T) {
 	if got := strings.Join(capabilities.ToolNames, ","); got != "read_file" {
 		t.Fatalf("unexpected effective tools: %s", got)
 	}
+	if len(capabilities.Policies) != 1 {
+		t.Fatalf("expected one policy application, got %+v", capabilities.Policies)
+	}
+	policy := capabilities.Policies[0]
+	if policy.NodeID != "readonly-policy" {
+		t.Fatalf("unexpected policy node: %+v", policy)
+	}
+	if got := strings.Join(policy.OutputTools, ","); got != "read_file" {
+		t.Fatalf("unexpected policy output tools: %+v", policy)
+	}
+	if !containsNodeID(policy.DroppedTools, "glob") || !containsNodeID(policy.DroppedTools, "write_file") {
+		t.Fatalf("expected dropped tools in policy trace: %+v", policy)
+	}
 }
 
 func TestEffectiveToolNamesReportsPolicyCycles(t *testing.T) {
