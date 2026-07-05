@@ -393,6 +393,43 @@ func TestServerWorkflowValidationRejectsMissingAgentBlueprint(t *testing.T) {
 	}
 }
 
+func TestServerWorkflowSimulationAPI(t *testing.T) {
+	workdir := t.TempDir()
+	if _, err := EnsureDefaultBlueprint(DefaultBlueprintPath(workdir)); err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(NewServer(workdir).Handler())
+	defer server.Close()
+
+	request := WorkflowSimulationRequest{
+		Workflow: DefaultWorkflow(),
+		Input:    "implement auth",
+	}
+	raw, err := json.Marshal(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := http.Post(server.URL+"/api/workflows/review-pipeline/simulate", "application/json", bytes.NewReader(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("simulate status = %d", resp.StatusCode)
+	}
+	var payload WorkflowSimulationResponse
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatal(err)
+	}
+	if !payload.OK || len(payload.Steps) != len(DefaultWorkflow().Nodes) {
+		t.Fatalf("unexpected simulation payload: %+v", payload)
+	}
+	developer := workflowSimulationStepByNodeID(payload.Steps, "developer")
+	if len(developer.Inputs) != 1 || developer.Inputs[0].Content != "implement auth" {
+		t.Fatalf("unexpected developer simulation: %+v", developer)
+	}
+}
+
 func TestServerCreateWorkflowAPI(t *testing.T) {
 	workdir := t.TempDir()
 	if _, err := EnsureDefaultBlueprint(DefaultBlueprintPath(workdir)); err != nil {

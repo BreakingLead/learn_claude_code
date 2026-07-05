@@ -80,6 +80,17 @@ type WorkflowValidationResponse struct {
 	Agents []WorkflowAgentResolution `json:"agents,omitempty"`
 }
 
+type WorkflowSimulationRequest struct {
+	Workflow WorkflowDefinition `json:"workflow"`
+	Input    string             `json:"input,omitempty"`
+}
+
+type WorkflowSimulationResponse struct {
+	OK    bool                     `json:"ok"`
+	Error string                   `json:"error,omitempty"`
+	Steps []WorkflowSimulationStep `json:"steps,omitempty"`
+}
+
 type WorkflowAgentResolution struct {
 	NodeID        string `json:"node_id"`
 	Label         string `json:"label"`
@@ -502,6 +513,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PUT /api/workflows/{id}", s.handlePutWorkflow)
 	mux.HandleFunc("DELETE /api/workflows/{id}", s.handleDeleteWorkflow)
 	mux.HandleFunc("POST /api/workflows/{id}/validate", s.handleValidateWorkflow)
+	mux.HandleFunc("POST /api/workflows/{id}/simulate", s.handleSimulateWorkflow)
 	static, _ := fs.Sub(webFS, "web")
 	mux.Handle("GET /", http.FileServer(http.FS(static)))
 	return mux
@@ -687,6 +699,28 @@ func (s *Server) handleValidateWorkflow(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, s.store.ValidateWorkflow(workflow))
 }
 
+func (s *Server) handleSimulateWorkflow(w http.ResponseWriter, r *http.Request) {
+	request, err := decodeWorkflowSimulationRequest(r.Body)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, WorkflowSimulationResponse{OK: false, Error: err.Error()})
+		return
+	}
+	if safeID(request.Workflow.ID) != safeID(r.PathValue("id")) {
+		writeJSON(w, http.StatusBadRequest, WorkflowSimulationResponse{OK: false, Error: "workflow id does not match route id"})
+		return
+	}
+	if err := s.store.ValidateWorkflowAgentReferences(request.Workflow); err != nil {
+		writeJSON(w, http.StatusOK, WorkflowSimulationResponse{OK: false, Error: err.Error()})
+		return
+	}
+	steps, err := SimulateWorkflow(request.Workflow, request.Input)
+	if err != nil {
+		writeJSON(w, http.StatusOK, WorkflowSimulationResponse{OK: false, Error: err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, WorkflowSimulationResponse{OK: true, Steps: steps})
+}
+
 func decodeBlueprint(body io.Reader) (Blueprint, error) {
 	defer io.Copy(io.Discard, body)
 	var blueprint Blueprint
@@ -729,6 +763,17 @@ func decodeWorkflow(body io.Reader) (WorkflowDefinition, error) {
 		return WorkflowDefinition{}, err
 	}
 	return workflow, nil
+}
+
+func decodeWorkflowSimulationRequest(body io.Reader) (WorkflowSimulationRequest, error) {
+	defer io.Copy(io.Discard, body)
+	var request WorkflowSimulationRequest
+	decoder := json.NewDecoder(body)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&request); err != nil {
+		return WorkflowSimulationRequest{}, err
+	}
+	return request, nil
 }
 
 func decodeCompositeFromSelection(body io.Reader) (CompositeFromSelectionRequest, error) {

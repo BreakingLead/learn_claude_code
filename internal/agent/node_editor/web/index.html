@@ -199,6 +199,22 @@
         font-size: 12px;
       }
 
+      .code-preview {
+        margin: 0;
+        max-height: 160px;
+        overflow: auto;
+        border: 1px solid #303746;
+        border-radius: 6px;
+        padding: 8px;
+        background: #0d0f14;
+        color: #cbd2dd;
+        white-space: pre-wrap;
+        word-break: break-word;
+        font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+        font-size: 11px;
+        line-height: 1.45;
+      }
+
       .node {
         min-width: 170px;
         border: 1px solid #3b4352;
@@ -585,6 +601,8 @@
         const [editorMode, setEditorMode] = useState("blueprint");
         const [validationResult, setValidationResult] = useState(null);
         const [workflowValidationResult, setWorkflowValidationResult] = useState(null);
+        const [workflowSimulationResult, setWorkflowSimulationResult] = useState(null);
+        const [workflowSimulationInput, setWorkflowSimulationInput] = useState("Describe the change you want this workflow to handle.");
         const selectedWorkflowNode = (() => {
           if (editorMode !== "workflow" || !selectedNodeId || !workflowSource.trim()) return null;
           try {
@@ -616,6 +634,7 @@
           setEdges(toFlowEdges(next));
           setValidationResult(null);
           setWorkflowValidationResult(null);
+          setWorkflowSimulationResult(null);
           if (message) setStatus(message);
         }, [setEdges, setNodes]);
 
@@ -1228,6 +1247,26 @@
           }
         };
 
+        const simulateWorkflow = async () => {
+          try {
+            const next = JSON.parse(workflowSource);
+            const response = await fetch(`/api/workflows/${next.id}/simulate`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ workflow: next, input: workflowSimulationInput }),
+            });
+            const result = await response.json();
+            setWorkflowSimulationResult(result);
+            if (!response.ok || !result.ok) {
+              setStatus(`workflow simulation failed: ${result.error || response.statusText}`);
+              return;
+            }
+            setStatus(`workflow simulation ready: ${(result.steps || []).length} steps`);
+          } catch (error) {
+            setStatus(`workflow simulation failed: ${error.message}`);
+          }
+        };
+
         const renderWorkflowValidationResult = () => {
           if (!workflowValidationResult) return null;
           if (!workflowValidationResult.ok) {
@@ -1275,6 +1314,51 @@
                   ])),
                 ])
               : React.createElement("div", { className: "muted", key: "no-agents" }, "No workflow agents."),
+          ]);
+        };
+
+        const renderWorkflowSimulationResult = () => {
+          if (!workflowSimulationResult) return null;
+          if (!workflowSimulationResult.ok) {
+            return React.createElement("div", { className: "validation", key: "workflow-simulation" }, [
+              React.createElement("div", { className: "validation-title", key: "title" }, "Workflow Simulation"),
+              React.createElement("div", { className: "diagnostics", key: "error" },
+                workflowSimulationResult.error || "Workflow simulation failed."
+              ),
+            ]);
+          }
+          const steps = workflowSimulationResult.steps || [];
+          return React.createElement("div", { className: "validation", key: "workflow-simulation" }, [
+            React.createElement("div", { className: "validation-title", key: "title" }, "Workflow simulation"),
+            ...steps.map((step, index) => React.createElement("div", { className: "validation", key: step.node_id }, [
+              React.createElement("div", { className: "validation-title", key: "title" },
+                `${index + 1}. ${step.label || step.node_id}`
+              ),
+              React.createElement("div", { className: "muted", key: "type" }, `type: ${step.type}`),
+              step.agent_blueprint
+                ? React.createElement("div", { className: "muted", key: "agent" }, `agent: ${step.agent_blueprint}`)
+                : null,
+              (step.inputs || []).length > 0
+                ? React.createElement("div", { className: "field", key: "inputs" }, [
+                    React.createElement("label", { key: "label" }, "Receives"),
+                    ...(step.inputs || []).map((input, inputIndex) =>
+                      React.createElement("pre", { className: "code-preview", key: `${input.from_node}-${inputIndex}` },
+                        `${input.from_node}.${input.from_port} -> ${step.node_id}.${input.target_port}\n${input.content || "(empty)"}`
+                      )
+                    ),
+                  ])
+                : null,
+              (step.outputs || []).length > 0
+                ? React.createElement("div", { className: "field", key: "outputs" }, [
+                    React.createElement("label", { key: "label" }, "Emits"),
+                    ...(step.outputs || []).map((output) =>
+                      React.createElement("pre", { className: "code-preview", key: output.port },
+                        `${step.node_id}.${output.port} -> ${(output.to || []).map((target) => `${target.node}.${target.port}`).join(", ") || "(end)"}\n${output.content || "(empty)"}`
+                      )
+                    ),
+                  ])
+                : null,
+            ])),
           ]);
         };
 
@@ -1463,6 +1547,13 @@
                     : null,
                   editorMode === "workflow"
                     ? React.createElement("button", {
+                        key: "simulate-workflow",
+                        disabled: !workflowSource.trim(),
+                        onClick: simulateWorkflow,
+                      }, "Simulate Workflow")
+                    : null,
+                  editorMode === "workflow"
+                    ? React.createElement("button", {
                         key: "new-workflow",
                         onClick: () => createWorkflow(""),
                       }, "New Workflow")
@@ -1641,6 +1732,17 @@
                 : editorMode === "workflow"
                 ? React.createElement("div", { className: "inspector", key: "workflow-inspector" }, [
                     renderWorkflowValidationResult(),
+                    React.createElement("div", { className: "field", key: "simulation-input" }, [
+                      React.createElement("label", { key: "label" }, "Simulation Input"),
+                      React.createElement("textarea", {
+                        className: "config-editor",
+                        key: "textarea",
+                        value: workflowSimulationInput,
+                        spellCheck: "false",
+                        onChange: (event) => setWorkflowSimulationInput(event.target.value),
+                      }),
+                    ]),
+                    renderWorkflowSimulationResult(),
                     React.createElement("div", { className: "muted", key: "help" }, activeWorkflowId
                       ? "Edit the multi-agent workflow DAG JSON. Validation checks typed message ports and cycle-free execution order."
                       : "No workflow selected."),

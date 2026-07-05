@@ -51,6 +51,28 @@ func TestWorkflowExecutionPlanShowsDataFlow(t *testing.T) {
 	}
 }
 
+func TestSimulateWorkflowShowsMessageHandoff(t *testing.T) {
+	steps, err := SimulateWorkflow(DefaultWorkflow(), "build the API")
+	if err != nil {
+		t.Fatal(err)
+	}
+	prompt := workflowSimulationStepByNodeID(steps, "prompt")
+	if len(prompt.Outputs) != 1 || prompt.Outputs[0].Content != "build the API" {
+		t.Fatalf("unexpected prompt simulation: %+v", prompt)
+	}
+	developer := workflowSimulationStepByNodeID(steps, "developer")
+	if len(developer.Inputs) != 1 || developer.Inputs[0].FromNode != "prompt" {
+		t.Fatalf("unexpected developer inputs: %+v", developer)
+	}
+	if len(developer.Outputs) != 1 || !strings.Contains(developer.Outputs[0].Content, "Developer Agent") {
+		t.Fatalf("unexpected developer output: %+v", developer)
+	}
+	output := workflowSimulationStepByNodeID(steps, "output")
+	if len(output.Inputs) != 1 || output.Inputs[0].FromNode != "summary" {
+		t.Fatalf("unexpected output inputs: %+v", output)
+	}
+}
+
 func TestEnsureDefaultWorkflowWritesOnce(t *testing.T) {
 	path := filepath.Join(t.TempDir(), ".agents", "blueprints", "workflows", "review-pipeline.json")
 	created, err := EnsureDefaultWorkflow(path)
@@ -190,4 +212,13 @@ func workflowStepByNodeID(steps []WorkflowExecutionStep, nodeID string) Workflow
 		}
 	}
 	return WorkflowExecutionStep{}
+}
+
+func workflowSimulationStepByNodeID(steps []WorkflowSimulationStep, nodeID string) WorkflowSimulationStep {
+	for _, step := range steps {
+		if step.NodeID == nodeID {
+			return step
+		}
+	}
+	return WorkflowSimulationStep{}
 }

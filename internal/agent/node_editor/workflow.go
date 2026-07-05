@@ -45,6 +45,28 @@ type WorkflowExecutionStep struct {
 	OutputsTo      []string `json:"outputs_to,omitempty"`
 }
 
+type WorkflowSimulationStep struct {
+	NodeID         string                     `json:"node_id"`
+	Type           string                     `json:"type"`
+	Label          string                     `json:"label"`
+	AgentBlueprint string                     `json:"agent_blueprint,omitempty"`
+	Inputs         []WorkflowSimulationInput  `json:"inputs,omitempty"`
+	Outputs        []WorkflowSimulationOutput `json:"outputs,omitempty"`
+}
+
+type WorkflowSimulationInput struct {
+	FromNode   string `json:"from_node"`
+	FromPort   string `json:"from_port"`
+	TargetPort string `json:"target_port"`
+	Content    string `json:"content"`
+}
+
+type WorkflowSimulationOutput struct {
+	Port    string     `json:"port"`
+	Content string     `json:"content"`
+	To      []Endpoint `json:"to,omitempty"`
+}
+
 func DefaultWorkflow() WorkflowDefinition {
 	return WorkflowDefinition{
 		Version: SchemaVersion,
@@ -282,6 +304,46 @@ func WorkflowExecutionPlan(workflow WorkflowDefinition) ([]WorkflowExecutionStep
 	return steps, nil
 }
 
+func SimulateWorkflow(workflow WorkflowDefinition, input string) ([]WorkflowSimulationStep, error) {
+	order, err := WorkflowExecutionOrder(workflow)
+	if err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(input) == "" {
+		input = "Sample workflow input"
+	}
+	nodes := map[string]WorkflowNode{}
+	incoming := map[string][]Edge{}
+	outgoing := map[string][]Edge{}
+	for _, node := range workflow.Nodes {
+		nodes[node.ID] = node
+	}
+	for _, edge := range workflow.Edges {
+		incoming[edge.Target.Node] = append(incoming[edge.Target.Node], edge)
+		outgoing[edge.Source.Node] = append(outgoing[edge.Source.Node], edge)
+	}
+
+	messages := map[string]string{}
+	steps := make([]WorkflowSimulationStep, 0, len(order))
+	for _, nodeID := range order {
+		node := nodes[nodeID]
+		stepInputs := workflowSimulationInputs(incoming[node.ID], messages)
+		outputs := workflowSimulationOutputs(node, stepInputs, input, outgoing[node.ID])
+		for _, output := range outputs {
+			messages[endpointKey(Endpoint{Node: node.ID, Port: output.Port})] = output.Content
+		}
+		steps = append(steps, WorkflowSimulationStep{
+			NodeID:         node.ID,
+			Type:           node.Type,
+			Label:          node.Label,
+			AgentBlueprint: node.AgentBlueprint,
+			Inputs:         stepInputs,
+			Outputs:        outputs,
+		})
+	}
+	return steps, nil
+}
+
 func validateWorkflowNode(node WorkflowNode) error {
 	switch node.Type {
 	case WorkflowNodeTypeInput, WorkflowNodeTypeOutput:
@@ -341,4 +403,71 @@ func validateWorkflowDAG(workflow WorkflowDefinition, nodes map[string]WorkflowN
 		}
 	}
 	return nil
+}
+
+func workflowSimulationInputs(edges []Edge, messages map[string]string) []WorkflowSimulationInput {
+	inputs := make([]WorkflowSimulationInput, 0, len(edges))
+	for _, edge := range edges {
+		inputs = append(inputs, WorkflowSimulationInput{
+			FromNode:   edge.Source.Node,
+			FromPort:   edge.Source.Port,
+			TargetPort: edge.Target.Port,
+			Content:    messages[endpointKey(edge.Source)],
+		})
+	}
+	return inputs
+}
+
+func workflowSimulationOutputs(node WorkflowNode, inputs []WorkflowSimulationInput, input string, outgoing []Edge) []WorkflowSimulationOutput {
+	var outputs []WorkflowSimulationOutput
+	for _, port := range node.Outputs {
+		if port.Direction != DirectionOutput || port.Type != PortTypeMessage {
+			continue
+		}
+		outputs = append(outputs, WorkflowSimulationOutput{
+			Port:    port.ID,
+			Content: workflowSimulationContent(node, inputs, input),
+			To:      workflowSimulationTargets(port.ID, outgoing),
+		})
+	}
+	return outputs
+}
+
+func workflowSimulationContent(node WorkflowNode, inputs []WorkflowSimulationInput, input string) string {
+	label := node.Label
+	if strings.TrimSpace(label) == "" {
+		label = node.ID
+	}
+	switch node.Type {
+	case WorkflowNodeTypeInput:
+		return input
+	case WorkflowNodeTypeAgent:
+		var from []string
+		for _, input := range inputs {
+			from = append(from, input.FromNode+"."+input.FromPort)
+		}
+		return fmt.Sprintf("[Simulated %s via %s]\nInputs: %s", label, node.AgentBlueprint, strings.Join(from, ", "))
+	default:
+		var parts []string
+		for _, input := range inputs {
+			if strings.TrimSpace(input.Content) != "" {
+				parts = append(parts, input.Content)
+			}
+		}
+		return strings.Join(parts, "\n\n")
+	}
+}
+
+func workflowSimulationTargets(portID string, outgoing []Edge) []Endpoint {
+	var targets []Endpoint
+	for _, edge := range outgoing {
+		if edge.Source.Port == portID {
+			targets = append(targets, edge.Target)
+		}
+	}
+	return targets
+}
+
+func endpointKey(endpoint Endpoint) string {
+	return endpoint.Node + ":" + endpoint.Port
 }
