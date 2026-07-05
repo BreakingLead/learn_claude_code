@@ -207,7 +207,6 @@
       import React, { useCallback, useEffect, useState } from "https://esm.sh/react@18.3.1";
       import { createRoot } from "https://esm.sh/react-dom@18.3.1/client";
       import ReactFlow, {
-        addEdge,
         Background,
         Controls,
         Handle,
@@ -339,6 +338,39 @@
         };
       }
 
+      function withNextPromptInput(blueprint) {
+        const edges = blueprint.edges || [];
+        let changed = false;
+        const nodes = (blueprint.nodes || []).map((node) => {
+          if (node.type !== "agent") return node;
+          const inputs = node.inputs || [];
+          const promptInputs = inputs
+            .filter((port) => port.type === "prompt")
+            .sort((left, right) => (left.order || 0) - (right.order || 0));
+          if (promptInputs.length === 0) return node;
+          const hasOpenPromptInput = promptInputs.some((port) =>
+            !edges.some((edge) => edge.target.node === node.id && edge.target.port === port.id)
+          );
+          if (hasOpenPromptInput) return node;
+          const nextOrder = Math.max(...promptInputs.map((port) => port.order || 0)) + 1;
+          changed = true;
+          return {
+            ...node,
+            inputs: [
+              ...inputs,
+              {
+                id: `prompt_${nextOrder}`,
+                type: "prompt",
+                label: `Prompt ${nextOrder}`,
+                direction: "input",
+                order: nextOrder,
+              },
+            ],
+          };
+        });
+        return changed ? { ...blueprint, nodes } : blueprint;
+      }
+
       function slug(text) {
         return String(text || "node")
           .toLowerCase()
@@ -454,23 +486,13 @@
             return;
           }
           const edge = edgeFromConnection(connection);
-          const next = {
+          const next = withNextPromptInput({
             ...blueprint,
             edges: [...(blueprint.edges || []), edge],
-          };
-          setBlueprint(next);
-          setSource(JSON.stringify(next, null, 2));
-          setEdges((current) => addEdge({
-            id: edge.id,
-            source: edge.source.node,
-            sourceHandle: edge.source.port,
-            target: edge.target.node,
-            targetHandle: edge.target.port,
-            markerEnd: { type: MarkerType.ArrowClosed },
-            style: { stroke: "#7f8da3" },
-          }, current));
+          });
+          updateDocument(next);
           setStatus("connected");
-        }, [blueprint, edges, setEdges]);
+        }, [blueprint, edges, updateDocument]);
 
         const updateNodePosition = useCallback((_, node) => {
           if (!blueprint) return;
