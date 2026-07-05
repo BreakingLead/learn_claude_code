@@ -752,6 +752,22 @@ func TestServerRunWorkflowPlanAPI(t *testing.T) {
 		t.Fatalf("unexpected stored run: %+v", stored)
 	}
 
+	resp, err = http.Post(server.URL+"/api/workflow-runs/review-pipeline/"+payload.Run.ID+"/rerun", "application/json", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var rerunPayload WorkflowRunSaveResponse
+	if err := json.NewDecoder(resp.Body).Decode(&rerunPayload); err != nil {
+		t.Fatal(err)
+	}
+	if !rerunPayload.OK || rerunPayload.Run.ID == "" || rerunPayload.Run.ID == payload.Run.ID {
+		t.Fatalf("expected rerun to create a new saved run: %+v", rerunPayload)
+	}
+	if rerunPayload.Run.Input != payload.Run.Input || rerunPayload.Run.ExecutionMode != payload.Run.ExecutionMode {
+		t.Fatalf("expected rerun to reuse prior config: old=%+v new=%+v", payload.Run, rerunPayload.Run)
+	}
+
 	req, err := http.NewRequest(http.MethodDelete, server.URL+"/api/workflow-runs/review-pipeline/"+payload.Run.ID, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -763,6 +779,18 @@ func TestServerRunWorkflowPlanAPI(t *testing.T) {
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("delete workflow run status = %d", resp.StatusCode)
+	}
+	req, err = http.NewRequest(http.MethodDelete, server.URL+"/api/workflow-runs/review-pipeline/"+rerunPayload.Run.ID, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("delete rerun workflow run status = %d", resp.StatusCode)
 	}
 
 	resp, err = http.Get(server.URL + "/api/workflow-runs/review-pipeline")

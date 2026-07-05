@@ -1,6 +1,7 @@
 package nodeeditor
 
 import (
+	"context"
 	"crypto/sha256"
 	"embed"
 	"encoding/hex"
@@ -603,12 +604,25 @@ func (s *Store) DeleteWorkflowRun(workflowID string, runID string) error {
 	return nil
 }
 
+func (s *Store) RerunWorkflowRun(ctx context.Context, workflowID string, runID string) (WorkflowPlanRun, error) {
+	previous, err := s.ReadWorkflowRun(workflowID, runID)
+	if err != nil {
+		return WorkflowPlanRun{}, err
+	}
+	return s.RunWorkflowPlan(ctx, workflowID, WorkflowPlanRunRequest{
+		Input:           previous.Input,
+		ExecutionMode:   previous.ExecutionMode,
+		ExternalCommand: append([]string(nil), previous.ExternalCommand...),
+		TimeoutMS:       previous.TimeoutMS,
+	})
+}
+
 func (s *Store) SaveWorkflowRun(run WorkflowPlanRun) (WorkflowPlanRun, string, error) {
 	if strings.TrimSpace(run.WorkflowID) == "" {
 		return WorkflowPlanRun{}, "", fmt.Errorf("workflow id is required")
 	}
 	if strings.TrimSpace(run.ID) == "" {
-		run.ID = "run_" + time.Now().UTC().Format("20060102T150405000000000Z")
+		run.ID = fmt.Sprintf("run_%d", time.Now().UTC().UnixNano())
 	}
 	if strings.TrimSpace(run.CreatedAt) == "" {
 		run.CreatedAt = time.Now().UTC().Format(time.RFC3339Nano)
@@ -916,6 +930,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /api/workflow-plans/{id}", s.handleDeleteWorkflowPlan)
 	mux.HandleFunc("GET /api/workflow-runs/{workflow_id}", s.handleListWorkflowRuns)
 	mux.HandleFunc("GET /api/workflow-runs/{workflow_id}/{run_id}", s.handleGetWorkflowRun)
+	mux.HandleFunc("POST /api/workflow-runs/{workflow_id}/{run_id}/rerun", s.handleRerunWorkflowRun)
 	mux.HandleFunc("DELETE /api/workflow-runs/{workflow_id}/{run_id}", s.handleDeleteWorkflowRun)
 	static, _ := fs.Sub(webFS, "web")
 	mux.Handle("GET /", http.FileServer(http.FS(static)))
@@ -1134,6 +1149,27 @@ func (s *Server) handleDeleteWorkflowRun(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func (s *Server) handleRerunWorkflowRun(w http.ResponseWriter, r *http.Request) {
+	run, err := s.store.RerunWorkflowRun(r.Context(), r.PathValue("workflow_id"), r.PathValue("run_id"))
+	if err != nil {
+		if run.WorkflowID != "" {
+			saved, path, saveErr := s.store.SaveWorkflowRun(run)
+			if saveErr == nil {
+				writeJSON(w, http.StatusOK, WorkflowRunSaveResponse{OK: false, Error: err.Error(), Path: path, Run: saved})
+				return
+			}
+		}
+		writeJSON(w, http.StatusOK, WorkflowRunSaveResponse{OK: false, Error: err.Error()})
+		return
+	}
+	run, path, err := s.store.SaveWorkflowRun(run)
+	if err != nil {
+		writeJSON(w, http.StatusOK, WorkflowRunSaveResponse{OK: false, Error: err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, WorkflowRunSaveResponse{OK: true, Path: path, Run: run})
 }
 
 func (s *Server) handleCreateWorkflow(w http.ResponseWriter, r *http.Request) {

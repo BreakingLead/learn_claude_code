@@ -757,6 +757,29 @@
           }
         };
 
+        const rerunWorkflowRun = async () => {
+          if (!activeWorkflowPlanId || !activeWorkflowRunId) return;
+          try {
+            const response = await fetch(`/api/workflow-runs/${activeWorkflowPlanId}/${activeWorkflowRunId}/rerun`, { method: "POST" });
+            const result = await response.json();
+            setWorkflowRunResult(result);
+            if (!response.ok || !result.ok) {
+              if (result.run?.id) {
+                setActiveWorkflowRunId(result.run.id);
+                await loadWorkflowRuns(result.run.workflow_id || activeWorkflowPlanId);
+              }
+              setStatus(`workflow run rerun failed: ${result.error || response.statusText}`);
+              return;
+            }
+            setActiveWorkflowRunId(result.run?.id || "");
+            await loadWorkflowRuns(result.run?.workflow_id || activeWorkflowPlanId);
+            setStatus(`workflow run rerun ready: ${(result.run?.steps || []).length} agent steps`);
+          } catch (error) {
+            setWorkflowRunResult({ ok: false, error: error.message });
+            setStatus(`workflow run rerun failed: ${error.message}`);
+          }
+        };
+
         const loadWorkflowPlan = useCallback(async (id) => {
           const response = await fetch(`/api/workflow-plans/${id}`);
           const data = await response.json();
@@ -2187,6 +2210,12 @@
                         title: activeWorkflowRun?.output || "Load saved workflow run.",
                         onClick: () => loadWorkflowRun(activeWorkflowPlanId, activeWorkflowRunId).catch((error) => setStatus(`workflow run load failed: ${error.message}`)),
                       }, "Load Run"),
+                      React.createElement("button", {
+                        key: "rerun",
+                        disabled: !activeWorkflowPlanId || !activeWorkflowRunId,
+                        title: "Run the current saved plan with this run's saved input and execution settings.",
+                        onClick: rerunWorkflowRun,
+                      }, "Rerun"),
                       React.createElement("button", {
                         key: "delete",
                         disabled: !activeWorkflowPlanId || !activeWorkflowRunId,
