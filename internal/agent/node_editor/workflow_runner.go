@@ -17,8 +17,10 @@ type WorkflowPlanRunResponse struct {
 }
 
 type WorkflowPlanRun struct {
+	ID          string                  `json:"id,omitempty"`
 	WorkflowID  string                  `json:"workflow_id"`
 	Name        string                  `json:"name"`
+	CreatedAt   string                  `json:"created_at,omitempty"`
 	SourceHash  string                  `json:"source_hash"`
 	CurrentHash string                  `json:"current_hash,omitempty"`
 	Stale       bool                    `json:"stale"`

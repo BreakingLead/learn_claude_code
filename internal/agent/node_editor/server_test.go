@@ -720,6 +720,37 @@ func TestServerRunWorkflowPlanAPI(t *testing.T) {
 	if len(payload.Run.Outputs) != 1 || !strings.Contains(payload.Run.Outputs[0].Content, "Summary Agent") {
 		t.Fatalf("unexpected run output: %+v", payload.Run.Outputs)
 	}
+	if payload.Run.ID == "" || payload.Run.CreatedAt == "" {
+		t.Fatalf("expected saved run metadata: %+v", payload.Run)
+	}
+
+	resp, err = http.Get(server.URL + "/api/workflow-runs/review-pipeline")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var listPayload struct {
+		Runs []WorkflowRunSummary `json:"runs"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&listPayload); err != nil {
+		t.Fatal(err)
+	}
+	if len(listPayload.Runs) != 1 || listPayload.Runs[0].ID != payload.Run.ID {
+		t.Fatalf("unexpected run list: %+v", listPayload.Runs)
+	}
+
+	resp, err = http.Get(server.URL + "/api/workflow-runs/review-pipeline/" + payload.Run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var stored WorkflowPlanRun
+	if err := json.NewDecoder(resp.Body).Decode(&stored); err != nil {
+		t.Fatal(err)
+	}
+	if stored.ID != payload.Run.ID || stored.Input != "build the API" {
+		t.Fatalf("unexpected stored run: %+v", stored)
+	}
 }
 
 func TestServerCreateWorkflowAPI(t *testing.T) {

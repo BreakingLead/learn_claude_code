@@ -601,6 +601,8 @@
         const [workflowSource, setWorkflowSource] = useState("");
         const [workflowPlans, setWorkflowPlans] = useState([]);
         const [activeWorkflowPlanId, setActiveWorkflowPlanId] = useState("");
+        const [workflowRuns, setWorkflowRuns] = useState([]);
+        const [activeWorkflowRunId, setActiveWorkflowRunId] = useState("");
         const [editorMode, setEditorMode] = useState("blueprint");
         const [validationResult, setValidationResult] = useState(null);
         const [workflowValidationResult, setWorkflowValidationResult] = useState(null);
@@ -610,6 +612,7 @@
         const [compiledPlanPath, setCompiledPlanPath] = useState("");
         const [workflowSimulationInput, setWorkflowSimulationInput] = useState("Describe the change you want this workflow to handle.");
         const activeWorkflowPlan = workflowPlans.find((plan) => plan.id === activeWorkflowPlanId) || null;
+        const activeWorkflowRun = workflowRuns.find((run) => run.id === activeWorkflowRunId) || null;
         const selectedWorkflowNode = (() => {
           if (editorMode !== "workflow" || !selectedNodeId || !workflowSource.trim()) return null;
           try {
@@ -644,6 +647,8 @@
           setWorkflowSimulationResult(null);
           setWorkflowCompileResult(null);
           setWorkflowRunResult(null);
+          setWorkflowRuns([]);
+          setActiveWorkflowRunId("");
           setCompiledPlanPath("");
           if (message) setStatus(message);
         }, [setEdges, setNodes]);
@@ -696,6 +701,20 @@
           setActiveWorkflowPlanId((id) => id && plans.some((plan) => plan.id === id) ? id : plans[0]?.id || "");
         }, []);
 
+        const loadWorkflowRuns = useCallback(async (workflowId) => {
+          if (!workflowId) {
+            setWorkflowRuns([]);
+            setActiveWorkflowRunId("");
+            return;
+          }
+          const response = await fetch(`/api/workflow-runs/${workflowId}`);
+          const data = await response.json();
+          if (!response.ok) throw new Error(data.error || response.statusText);
+          const runs = Array.isArray(data.runs) ? data.runs : [];
+          setWorkflowRuns(runs);
+          setActiveWorkflowRunId((id) => id && runs.some((run) => run.id === id) ? id : runs[0]?.id || "");
+        }, []);
+
         const loadWorkflow = useCallback(async (id) => {
           const response = await fetch(`/api/workflows/${id}`);
           const data = await response.json();
@@ -706,6 +725,16 @@
           setStatus(`loaded workflow ${data.id}`);
         }, [updateWorkflowDocument]);
 
+        const loadWorkflowRun = useCallback(async (workflowId, runId) => {
+          if (!workflowId || !runId) return;
+          const response = await fetch(`/api/workflow-runs/${workflowId}/${runId}`);
+          const data = await response.json();
+          if (!response.ok) throw new Error(data.error || response.statusText);
+          setActiveWorkflowRunId(data.id);
+          setWorkflowRunResult({ ok: true, run: data });
+          setStatus(`loaded workflow run ${data.id}`);
+        }, []);
+
         const loadWorkflowPlan = useCallback(async (id) => {
           const response = await fetch(`/api/workflow-plans/${id}`);
           const data = await response.json();
@@ -715,8 +744,9 @@
           setWorkflowCompileResult({ ok: true, plan: { ...data, stale: !!summary.stale, current_hash: summary.current_hash || "" } });
           setWorkflowRunResult(null);
           setCompiledPlanPath(summary.path || "");
+          await loadWorkflowRuns(data.workflow_id);
           setStatus(`loaded compiled plan ${data.workflow_id}`);
-        }, [workflowPlans]);
+        }, [loadWorkflowRuns, workflowPlans]);
 
         const deleteWorkflowPlan = async () => {
           if (!activeWorkflowPlanId) return;
@@ -771,6 +801,8 @@
               setStatus(`workflow plan run failed: ${result.error || response.statusText}`);
               return;
             }
+            setActiveWorkflowRunId(result.run?.id || "");
+            await loadWorkflowRuns(result.run?.workflow_id || activeWorkflowPlanId);
             setStatus(`workflow plan dry-run ready: ${(result.run?.steps || []).length} agent steps`);
           } catch (error) {
             setWorkflowRunResult({ ok: false, error: error.message });
@@ -801,6 +833,12 @@
         useEffect(() => {
           loadTemplates();
         }, [loadTemplates]);
+
+        useEffect(() => {
+          if (editorMode === "workflow" && activeWorkflowPlanId) {
+            loadWorkflowRuns(activeWorkflowPlanId).catch((error) => setStatus(`workflow run list failed: ${error.message}`));
+          }
+        }, [activeWorkflowPlanId, editorMode, loadWorkflowRuns]);
 
         useEffect(() => {
           setConfigDraft(selectedNode ? JSON.stringify(selectedNode.config || {}, null, 2) : "");
@@ -2079,6 +2117,27 @@
                 : editorMode === "workflow"
                 ? React.createElement("div", { className: "inspector", key: "workflow-inspector" }, [
                     renderWorkflowValidationResult(),
+                    React.createElement("div", { className: "field", key: "workflow-runs" }, [
+                      React.createElement("label", { key: "label" }, "Run History"),
+                      React.createElement("select", {
+                        key: "select",
+                        value: activeWorkflowRunId,
+                        onChange: (event) => setActiveWorkflowRunId(event.target.value),
+                      }, [
+                        React.createElement("option", { key: "empty", value: "" }, workflowRuns.length ? "Select run" : "No runs"),
+                        ...workflowRuns.map((run) =>
+                          React.createElement("option", { key: run.id, value: run.id },
+                            `${run.created_at || run.id}${run.stale ? " (stale)" : ""}`
+                          )
+                        ),
+                      ]),
+                      React.createElement("button", {
+                        key: "load",
+                        disabled: !activeWorkflowPlanId || !activeWorkflowRunId,
+                        title: activeWorkflowRun?.output || "Load saved workflow run.",
+                        onClick: () => loadWorkflowRun(activeWorkflowPlanId, activeWorkflowRunId).catch((error) => setStatus(`workflow run load failed: ${error.message}`)),
+                      }, "Load Run"),
+                    ]),
                     React.createElement("div", { className: "field", key: "simulation-input" }, [
                       React.createElement("label", { key: "label" }, "Simulation Input"),
                       React.createElement("textarea", {

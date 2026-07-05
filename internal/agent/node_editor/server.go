@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 )
 
 //go:embed web/*
@@ -51,6 +52,16 @@ type WorkflowPlanSummary struct {
 	SourceHash  string `json:"source_hash,omitempty"`
 	CurrentHash string `json:"current_hash,omitempty"`
 	Stale       bool   `json:"stale"`
+}
+
+type WorkflowRunSummary struct {
+	ID         string `json:"id"`
+	WorkflowID string `json:"workflow_id"`
+	Name       string `json:"name"`
+	Path       string `json:"path"`
+	CreatedAt  string `json:"created_at"`
+	Stale      bool   `json:"stale"`
+	Output     string `json:"output,omitempty"`
 }
 
 type CreateBlueprintRequest struct {
@@ -114,6 +125,13 @@ type WorkflowCompiledPlanSaveResponse struct {
 	Error string               `json:"error,omitempty"`
 	Path  string               `json:"path,omitempty"`
 	Plan  WorkflowCompiledPlan `json:"plan,omitempty"`
+}
+
+type WorkflowRunSaveResponse struct {
+	OK    bool            `json:"ok"`
+	Error string          `json:"error,omitempty"`
+	Path  string          `json:"path,omitempty"`
+	Run   WorkflowPlanRun `json:"run,omitempty"`
 }
 
 type WorkflowCompiledPlan struct {
@@ -186,6 +204,14 @@ func (s *Store) WorkflowPlanDir() string {
 	return filepath.Join(s.root, "workflow_plans")
 }
 
+func (s *Store) WorkflowRunDir(id string) (string, error) {
+	id = safeID(id)
+	if id == "" {
+		return "", fmt.Errorf("workflow id is required")
+	}
+	return filepath.Join(s.root, "workflow_runs", id), nil
+}
+
 func (s *Store) AgentPath(id string) (string, error) {
 	id = safeID(id)
 	if id == "" {
@@ -216,6 +242,18 @@ func (s *Store) WorkflowPlanPath(id string) (string, error) {
 		return "", fmt.Errorf("workflow id is required")
 	}
 	return filepath.Join(s.WorkflowPlanDir(), id+".json"), nil
+}
+
+func (s *Store) WorkflowRunPath(workflowID string, runID string) (string, error) {
+	dir, err := s.WorkflowRunDir(workflowID)
+	if err != nil {
+		return "", err
+	}
+	runID = safeID(runID)
+	if runID == "" {
+		return "", fmt.Errorf("workflow run id is required")
+	}
+	return filepath.Join(dir, runID+".json"), nil
 }
 
 func (s *Store) ListAgents() ([]BlueprintSummary, error) {
@@ -338,6 +376,44 @@ func (s *Store) ListWorkflowPlans() ([]WorkflowPlanSummary, error) {
 	}
 	sort.Slice(summaries, func(i, j int) bool {
 		return summaries[i].ID < summaries[j].ID
+	})
+	return summaries, nil
+}
+
+func (s *Store) ListWorkflowRuns(workflowID string) ([]WorkflowRunSummary, error) {
+	dir, err := s.WorkflowRunDir(workflowID)
+	if err != nil {
+		return nil, err
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var summaries []WorkflowRunSummary
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
+			continue
+		}
+		path := filepath.Join(dir, entry.Name())
+		run, err := ReadWorkflowPlanRun(path)
+		if err != nil {
+			continue
+		}
+		summaries = append(summaries, WorkflowRunSummary{
+			ID:         run.ID,
+			WorkflowID: run.WorkflowID,
+			Name:       run.Name,
+			Path:       path,
+			CreatedAt:  run.CreatedAt,
+			Stale:      run.Stale,
+			Output:     workflowRunSummaryOutput(run),
+		})
+	}
+	sort.Slice(summaries, func(i, j int) bool {
+		return summaries[i].CreatedAt > summaries[j].CreatedAt
 	})
 	return summaries, nil
 }
@@ -493,6 +569,34 @@ func (s *Store) DeleteWorkflowPlan(id string) error {
 		return err
 	}
 	return nil
+}
+
+func (s *Store) ReadWorkflowRun(workflowID string, runID string) (WorkflowPlanRun, error) {
+	path, err := s.WorkflowRunPath(workflowID, runID)
+	if err != nil {
+		return WorkflowPlanRun{}, err
+	}
+	return ReadWorkflowPlanRun(path)
+}
+
+func (s *Store) SaveWorkflowRun(run WorkflowPlanRun) (WorkflowPlanRun, string, error) {
+	if strings.TrimSpace(run.WorkflowID) == "" {
+		return WorkflowPlanRun{}, "", fmt.Errorf("workflow id is required")
+	}
+	if strings.TrimSpace(run.ID) == "" {
+		run.ID = "run_" + time.Now().UTC().Format("20060102T150405000000000Z")
+	}
+	if strings.TrimSpace(run.CreatedAt) == "" {
+		run.CreatedAt = time.Now().UTC().Format(time.RFC3339Nano)
+	}
+	path, err := s.WorkflowRunPath(run.WorkflowID, run.ID)
+	if err != nil {
+		return WorkflowPlanRun{}, "", err
+	}
+	if err := writeWorkflowPlanRun(path, run); err != nil {
+		return WorkflowPlanRun{}, "", err
+	}
+	return run, path, nil
 }
 
 func (s *Store) DeleteWorkflow(id string) error {
@@ -786,6 +890,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/workflow-plans/{id}/refresh", s.handleRefreshWorkflowPlan)
 	mux.HandleFunc("POST /api/workflow-plans/{id}/run", s.handleRunWorkflowPlan)
 	mux.HandleFunc("DELETE /api/workflow-plans/{id}", s.handleDeleteWorkflowPlan)
+	mux.HandleFunc("GET /api/workflow-runs/{workflow_id}", s.handleListWorkflowRuns)
+	mux.HandleFunc("GET /api/workflow-runs/{workflow_id}/{run_id}", s.handleGetWorkflowRun)
 	static, _ := fs.Sub(webFS, "web")
 	mux.Handle("GET /", http.FileServer(http.FS(static)))
 	return mux
@@ -956,15 +1062,38 @@ func (s *Server) handleRefreshWorkflowPlan(w http.ResponseWriter, r *http.Reques
 func (s *Server) handleRunWorkflowPlan(w http.ResponseWriter, r *http.Request) {
 	request, err := decodeWorkflowPlanRunRequest(r.Body)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, WorkflowPlanRunResponse{OK: false, Error: err.Error()})
+		writeJSON(w, http.StatusBadRequest, WorkflowRunSaveResponse{OK: false, Error: err.Error()})
 		return
 	}
 	run, err := s.store.RunWorkflowPlan(r.Context(), r.PathValue("id"), request.Input)
 	if err != nil {
-		writeJSON(w, http.StatusOK, WorkflowPlanRunResponse{OK: false, Error: err.Error()})
+		writeJSON(w, http.StatusOK, WorkflowRunSaveResponse{OK: false, Error: err.Error()})
 		return
 	}
-	writeJSON(w, http.StatusOK, WorkflowPlanRunResponse{OK: true, Run: run})
+	run, path, err := s.store.SaveWorkflowRun(run)
+	if err != nil {
+		writeJSON(w, http.StatusOK, WorkflowRunSaveResponse{OK: false, Error: err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, WorkflowRunSaveResponse{OK: true, Path: path, Run: run})
+}
+
+func (s *Server) handleListWorkflowRuns(w http.ResponseWriter, r *http.Request) {
+	summaries, err := s.store.ListWorkflowRuns(r.PathValue("workflow_id"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"runs": summaries})
+}
+
+func (s *Server) handleGetWorkflowRun(w http.ResponseWriter, r *http.Request) {
+	run, err := s.store.ReadWorkflowRun(r.PathValue("workflow_id"), r.PathValue("run_id"))
+	if err != nil {
+		writeError(w, http.StatusNotFound, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, run)
 }
 
 func (s *Server) handleCreateWorkflow(w http.ResponseWriter, r *http.Request) {
@@ -1233,4 +1362,43 @@ func ReadCompiledWorkflowPlan(path string) (WorkflowCompiledPlan, error) {
 		return WorkflowCompiledPlan{}, err
 	}
 	return plan, nil
+}
+
+func writeWorkflowPlanRun(path string, run WorkflowPlanRun) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	raw, err := json.MarshalIndent(run, "", "  ")
+	if err != nil {
+		return err
+	}
+	raw = append(raw, '\n')
+	return os.WriteFile(path, raw, 0o644)
+}
+
+func ReadWorkflowPlanRun(path string) (WorkflowPlanRun, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return WorkflowPlanRun{}, err
+	}
+	var run WorkflowPlanRun
+	if err := json.Unmarshal(raw, &run); err != nil {
+		return WorkflowPlanRun{}, err
+	}
+	return run, nil
+}
+
+func workflowRunSummaryOutput(run WorkflowPlanRun) string {
+	for _, output := range run.Outputs {
+		content := strings.TrimSpace(output.Content)
+		if content == "" {
+			continue
+		}
+		runes := []rune(content)
+		if len(runes) > 160 {
+			return string(runes[:160]) + "..."
+		}
+		return content
+	}
+	return ""
 }
