@@ -176,7 +176,7 @@ func TestPlanExecutorTimesOutExternalCommand(t *testing.T) {
 		t.Fatalf("unexpected executor config: mode=%s executor=%+v", mode, executor)
 	}
 
-	_, err = executor.Execute(context.Background(), WorkflowCompiledPlan{
+	run, err := executor.Execute(context.Background(), WorkflowCompiledPlan{
 		WorkflowID: "timeout",
 		AgentRuns: []WorkflowCompiledRun{{
 			NodeID:  "agent",
@@ -185,6 +185,9 @@ func TestPlanExecutorTimesOutExternalCommand(t *testing.T) {
 	}, "input")
 	if err == nil || !strings.Contains(err.Error(), context.DeadlineExceeded.Error()) {
 		t.Fatalf("expected timeout error, got %v", err)
+	}
+	if run.Status != WorkflowRunStatusFailed || !strings.Contains(run.Error, context.DeadlineExceeded.Error()) {
+		t.Fatalf("expected failed run on timeout: %+v", run)
 	}
 }
 

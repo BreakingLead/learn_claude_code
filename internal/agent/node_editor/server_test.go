@@ -753,6 +753,58 @@ func TestServerRunWorkflowPlanAPI(t *testing.T) {
 	}
 }
 
+func TestServerRunWorkflowPlanPersistsFailures(t *testing.T) {
+	workdir := t.TempDir()
+	if _, err := EnsureDefaultBlueprint(DefaultBlueprintPath(workdir)); err != nil {
+		t.Fatal(err)
+	}
+	store := NewStore(workdir)
+	workflow := DefaultWorkflow()
+	if err := store.WriteWorkflow("review-pipeline", workflow); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := store.SaveCompiledWorkflowPlan(workflow); err != nil {
+		t.Fatal(err)
+	}
+	scriptPath := filepath.Join(workdir, "slow-invoker.sh")
+	script := "#!/bin/sh\nsleep 1\nprintf '{\"content\":\"late\"}\\n'\n"
+	if err := os.WriteFile(scriptPath, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(NewServer(workdir).Handler())
+	defer server.Close()
+
+	raw, err := json.Marshal(WorkflowPlanRunRequest{
+		Input:           "build the API",
+		ExecutionMode:   "external_command",
+		ExternalCommand: []string{scriptPath},
+		TimeoutMS:       20,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := http.Post(server.URL+"/api/workflow-plans/review-pipeline/run", "application/json", bytes.NewReader(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var payload WorkflowRunSaveResponse
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.OK || payload.Run.ID == "" || payload.Run.Status != WorkflowRunStatusFailed {
+		t.Fatalf("expected failed saved run response: %+v", payload)
+	}
+
+	runs, err := store.ListWorkflowRuns("review-pipeline")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(runs) != 1 || runs[0].ID != payload.Run.ID || runs[0].Status != WorkflowRunStatusFailed {
+		t.Fatalf("expected failed run in history: %+v", runs)
+	}
+}
+
 func TestServerCreateWorkflowAPI(t *testing.T) {
 	workdir := t.TempDir()
 	if _, err := EnsureDefaultBlueprint(DefaultBlueprintPath(workdir)); err != nil {

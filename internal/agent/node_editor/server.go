@@ -62,6 +62,8 @@ type WorkflowRunSummary struct {
 	CreatedAt     string `json:"created_at"`
 	ExecutionMode string `json:"execution_mode,omitempty"`
 	TimeoutMS     int    `json:"timeout_ms,omitempty"`
+	Status        string `json:"status,omitempty"`
+	Error         string `json:"error,omitempty"`
 	Stale         bool   `json:"stale"`
 	Output        string `json:"output,omitempty"`
 }
@@ -412,6 +414,8 @@ func (s *Store) ListWorkflowRuns(workflowID string) ([]WorkflowRunSummary, error
 			CreatedAt:     run.CreatedAt,
 			ExecutionMode: run.ExecutionMode,
 			TimeoutMS:     run.TimeoutMS,
+			Status:        run.Status,
+			Error:         run.Error,
 			Stale:         run.Stale,
 			Output:        workflowRunSummaryOutput(run),
 		})
@@ -1071,6 +1075,13 @@ func (s *Server) handleRunWorkflowPlan(w http.ResponseWriter, r *http.Request) {
 	}
 	run, err := s.store.RunWorkflowPlan(r.Context(), r.PathValue("id"), request)
 	if err != nil {
+		if run.WorkflowID != "" {
+			saved, path, saveErr := s.store.SaveWorkflowRun(run)
+			if saveErr == nil {
+				writeJSON(w, http.StatusOK, WorkflowRunSaveResponse{OK: false, Error: err.Error(), Path: path, Run: saved})
+				return
+			}
+		}
 		writeJSON(w, http.StatusOK, WorkflowRunSaveResponse{OK: false, Error: err.Error()})
 		return
 	}

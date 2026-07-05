@@ -806,6 +806,10 @@
             const result = await response.json();
             setWorkflowRunResult(result);
             if (!response.ok || !result.ok) {
+              if (result.run?.id) {
+                setActiveWorkflowRunId(result.run.id);
+                await loadWorkflowRuns(result.run.workflow_id || activeWorkflowPlanId);
+              }
               setStatus(`workflow plan run failed: ${result.error || response.statusText}`);
               return;
             }
@@ -1650,7 +1654,7 @@
 
         const renderWorkflowRunResult = () => {
           if (!workflowRunResult) return null;
-          if (!workflowRunResult.ok) {
+          if (!workflowRunResult.ok && !workflowRunResult.run) {
             return React.createElement("div", { className: "validation", key: "workflow-run" }, [
               React.createElement("div", { className: "validation-title", key: "title" }, "Workflow Plan Run"),
               React.createElement("div", { className: "diagnostics", key: "error" },
@@ -1661,6 +1665,14 @@
           const run = workflowRunResult.run || {};
           return React.createElement("div", { className: "validation", key: "workflow-run" }, [
             React.createElement("div", { className: "validation-title", key: "title" }, "Workflow plan run"),
+            React.createElement("div", { className: run.status === "failed" ? "diagnostics" : "muted", key: "status" },
+              `status: ${run.status || (workflowRunResult.ok ? "completed" : "failed")}`
+            ),
+            !workflowRunResult.ok || run.error
+              ? React.createElement("div", { className: "diagnostics", key: "run-error" },
+                  run.error || workflowRunResult.error || "Workflow plan run failed."
+                )
+              : null,
             React.createElement("div", { className: "muted", key: "mode" }, `mode: ${run.execution_mode || "dry_run"}`),
             React.createElement("div", { className: "muted", key: "timeout" }, `timeout: ${run.timeout_ms || 30000}ms`),
             React.createElement("div", { className: "muted", key: "input" }, `input: ${run.input || "(empty)"}`),
@@ -2137,7 +2149,7 @@
                         React.createElement("option", { key: "empty", value: "" }, workflowRuns.length ? "Select run" : "No runs"),
                         ...workflowRuns.map((run) =>
                           React.createElement("option", { key: run.id, value: run.id },
-                            `${run.created_at || run.id} [${run.execution_mode || "dry_run"}]${run.stale ? " (stale)" : ""}`
+                            `${run.created_at || run.id} [${run.execution_mode || "dry_run"}:${run.status || "completed"}]${run.stale ? " (stale)" : ""}`
                           )
                         ),
                       ]),

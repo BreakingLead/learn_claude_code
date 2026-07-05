@@ -10,7 +10,11 @@ import (
 	"time"
 )
 
-const DefaultWorkflowRunTimeoutMS = 30000
+const (
+	DefaultWorkflowRunTimeoutMS = 30000
+	WorkflowRunStatusCompleted  = "completed"
+	WorkflowRunStatusFailed     = "failed"
+)
 
 type WorkflowPlanRunRequest struct {
 	Input           string   `json:"input,omitempty"`
@@ -26,6 +30,8 @@ type WorkflowPlanRun struct {
 	CreatedAt     string                  `json:"created_at,omitempty"`
 	ExecutionMode string                  `json:"execution_mode,omitempty"`
 	TimeoutMS     int                     `json:"timeout_ms,omitempty"`
+	Status        string                  `json:"status,omitempty"`
+	Error         string                  `json:"error,omitempty"`
 	SourceHash    string                  `json:"source_hash"`
 	CurrentHash   string                  `json:"current_hash,omitempty"`
 	Stale         bool                    `json:"stale"`
@@ -135,9 +141,6 @@ func (s *Store) RunWorkflowPlan(ctx context.Context, id string, request Workflow
 		return WorkflowPlanRun{}, err
 	}
 	run, err := executor.Execute(ctx, plan, request.Input)
-	if err != nil {
-		return WorkflowPlanRun{}, err
-	}
 	run.ExecutionMode = mode
 	currentHash, stale := s.currentWorkflowHash(plan.WorkflowID, plan.SourceHash)
 	run.CurrentHash = currentHash
@@ -145,7 +148,7 @@ func (s *Store) RunWorkflowPlan(ctx context.Context, id string, request Workflow
 	if stale {
 		run.Diagnostics = append(run.Diagnostics, "saved workflow plan is stale; refresh it before using this dry-run as evidence")
 	}
-	return run, nil
+	return run, err
 }
 
 func RunCompiledWorkflowPlan(plan WorkflowCompiledPlan, input string) WorkflowPlanRun {
@@ -155,6 +158,8 @@ func RunCompiledWorkflowPlan(plan WorkflowCompiledPlan, input string) WorkflowPl
 			WorkflowID:    plan.WorkflowID,
 			Name:          plan.Name,
 			ExecutionMode: "dry_run",
+			Status:        WorkflowRunStatusFailed,
+			Error:         err.Error(),
 			SourceHash:    plan.SourceHash,
 			Input:         input,
 			Diagnostics:   []string{err.Error()},
@@ -185,6 +190,7 @@ func (e PlanExecutor) Execute(ctx context.Context, plan WorkflowCompiledPlan, in
 		WorkflowID:  plan.WorkflowID,
 		Name:        plan.Name,
 		TimeoutMS:   e.TimeoutMS,
+		Status:      WorkflowRunStatusCompleted,
 		SourceHash:  plan.SourceHash,
 		Input:       input,
 		Diagnostics: append([]string(nil), plan.Diagnostics...),
@@ -192,12 +198,13 @@ func (e PlanExecutor) Execute(ctx context.Context, plan WorkflowCompiledPlan, in
 
 	for _, agentRun := range plan.AgentRuns {
 		if err := ctx.Err(); err != nil {
-			return WorkflowPlanRun{}, err
+			return failWorkflowPlanRun(run, err), err
 		}
 		stepInputs := workflowPlanRunInputs(agentRun.Inputs, messages, input)
 		result, err := invoker.InvokeAgent(ctx, AgentInvocation{Run: agentRun, Inputs: stepInputs})
 		if err != nil {
-			return WorkflowPlanRun{}, fmt.Errorf("invoke agent %q: %w", agentRun.NodeID, err)
+			err = fmt.Errorf("invoke agent %q: %w", agentRun.NodeID, err)
+			return failWorkflowPlanRun(run, err), err
 		}
 		step := WorkflowPlanRunStep{
 			NodeID:      agentRun.NodeID,
@@ -229,6 +236,15 @@ func (e PlanExecutor) Execute(ctx context.Context, plan WorkflowCompiledPlan, in
 		})
 	}
 	return run, nil
+}
+
+func failWorkflowPlanRun(run WorkflowPlanRun, err error) WorkflowPlanRun {
+	run.Status = WorkflowRunStatusFailed
+	if err != nil {
+		run.Error = err.Error()
+		run.Diagnostics = append(run.Diagnostics, err.Error())
+	}
+	return run
 }
 
 func (DryRunAgentInvoker) InvokeAgent(ctx context.Context, invocation AgentInvocation) (AgentInvocationResult, error) {
