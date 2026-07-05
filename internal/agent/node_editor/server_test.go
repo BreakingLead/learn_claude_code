@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -757,6 +758,23 @@ func TestServerRunWorkflowPlanAPI(t *testing.T) {
 	}
 	if stored.ID != payload.Run.ID || stored.Input != "build the API" {
 		t.Fatalf("unexpected stored run: %+v", stored)
+	}
+
+	resp, err = http.Get(server.URL + "/api/workflow-runs/review-pipeline/" + payload.Run.ID + "/report")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	reportRaw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	report := string(reportRaw)
+	if resp.StatusCode != http.StatusOK || !strings.HasPrefix(resp.Header.Get("Content-Type"), "text/markdown") {
+		t.Fatalf("unexpected report response: status=%d content-type=%q", resp.StatusCode, resp.Header.Get("Content-Type"))
+	}
+	if !strings.Contains(report, "# Workflow Run Report") || !strings.Contains(report, payload.Run.ID) || !strings.Contains(report, "build the API") || !strings.Contains(report, "Summary Agent") {
+		t.Fatalf("unexpected workflow run report:\n%s", report)
 	}
 
 	resp, err = http.Post(server.URL+"/api/workflow-runs/review-pipeline/"+payload.Run.ID+"/rerun", "application/json", nil)

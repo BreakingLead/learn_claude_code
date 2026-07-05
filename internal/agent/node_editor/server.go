@@ -958,6 +958,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/workflow-plans/{id}/run", s.handleRunWorkflowPlan)
 	mux.HandleFunc("DELETE /api/workflow-plans/{id}", s.handleDeleteWorkflowPlan)
 	mux.HandleFunc("GET /api/workflow-runs/{workflow_id}", s.handleListWorkflowRuns)
+	mux.HandleFunc("GET /api/workflow-runs/{workflow_id}/{run_id}/report", s.handleGetWorkflowRunReport)
 	mux.HandleFunc("GET /api/workflow-runs/{workflow_id}/{run_id}", s.handleGetWorkflowRun)
 	mux.HandleFunc("POST /api/workflow-runs/{workflow_id}/{run_id}/rerun", s.handleRerunWorkflowRun)
 	mux.HandleFunc("DELETE /api/workflow-runs/{workflow_id}/{run_id}", s.handleDeleteWorkflowRun)
@@ -1170,6 +1171,22 @@ func (s *Server) handleGetWorkflowRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, run)
+}
+
+func (s *Server) handleGetWorkflowRunReport(w http.ResponseWriter, r *http.Request) {
+	run, err := s.store.ReadWorkflowRun(r.PathValue("workflow_id"), r.PathValue("run_id"))
+	if err != nil {
+		writeError(w, http.StatusNotFound, err)
+		return
+	}
+	filename := safeID(run.ID)
+	if filename == "" {
+		filename = "workflow-run"
+	}
+	w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filename+".md"))
+	w.WriteHeader(http.StatusOK)
+	_, _ = io.WriteString(w, WorkflowRunMarkdownReport(run))
 }
 
 func (s *Server) handleDeleteWorkflowRun(w http.ResponseWriter, r *http.Request) {

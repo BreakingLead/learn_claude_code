@@ -738,6 +738,29 @@
           setStatus(`loaded workflow run ${data.id}`);
         }, []);
 
+        const downloadWorkflowRunReport = async () => {
+          if (!activeWorkflowPlanId || !activeWorkflowRunId) return;
+          try {
+            const response = await fetch(`/api/workflow-runs/${activeWorkflowPlanId}/${activeWorkflowRunId}/report`);
+            const text = await response.text();
+            if (!response.ok) {
+              throw new Error(text || response.statusText);
+            }
+            const blob = new Blob([text], { type: "text/markdown;charset=utf-8" });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement("a");
+            link.href = url;
+            link.download = `${activeWorkflowRunId}.md`;
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            URL.revokeObjectURL(url);
+            setStatus(`downloaded workflow run report ${activeWorkflowRunId}`);
+          } catch (error) {
+            setStatus(`workflow run report failed: ${error.message}`);
+          }
+        };
+
         const deleteWorkflowRun = async () => {
           if (!activeWorkflowPlanId || !activeWorkflowRunId) return;
           if (!window.confirm(`Delete workflow run ${activeWorkflowRunId}?`)) return;
@@ -2245,6 +2268,12 @@
                         title: "Run the current saved plan with this run's saved input and execution settings.",
                         onClick: rerunWorkflowRun,
                       }, "Rerun"),
+                      React.createElement("button", {
+                        key: "report",
+                        disabled: !activeWorkflowPlanId || !activeWorkflowRunId,
+                        title: "Download this workflow run as a Markdown evidence report.",
+                        onClick: downloadWorkflowRunReport,
+                      }, "Download Report"),
                       React.createElement("button", {
                         key: "delete",
                         disabled: !activeWorkflowPlanId || !activeWorkflowRunId,
