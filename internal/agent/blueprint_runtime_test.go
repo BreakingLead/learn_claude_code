@@ -84,6 +84,48 @@ func TestRuntimeUsesBlueprintPromptOrderWhenEnabled(t *testing.T) {
 	}
 }
 
+func TestRuntimeUsesFileBackedSkillNodeWhenEnabled(t *testing.T) {
+	workdir := t.TempDir()
+	writeFile(t, filepath.Join(workdir, ".agents", "skills", "reviewer", "SKILL.md"), "# Reviewer\nCheck edge cases.")
+	config := testConfig(workdir)
+	config.UseBlueprint = true
+	blueprint := nodeeditor.DefaultBlueprint()
+	blueprint.Nodes = append(blueprint.Nodes, nodeeditor.Node{
+		ID:       "reviewer-skill",
+		Type:     "skill",
+		Label:    "Reviewer Skill",
+		Position: nodeeditor.Position{X: 120, Y: 520},
+		Outputs: []nodeeditor.Port{
+			{ID: "prompt_out", Type: nodeeditor.PortTypePrompt, Label: "Prompt", Direction: nodeeditor.DirectionOutput},
+		},
+		Config: map[string]any{
+			"source": "skill_file",
+			"path":   ".agents/skills/reviewer/SKILL.md",
+		},
+	})
+	blueprint.Nodes[0].Inputs = append(blueprint.Nodes[0].Inputs, nodeeditor.Port{
+		ID:        "prompt_4",
+		Type:      nodeeditor.PortTypePrompt,
+		Label:     "Prompt 4",
+		Direction: nodeeditor.DirectionInput,
+		Order:     4,
+	})
+	blueprint.Edges = append(blueprint.Edges, nodeeditor.Edge{
+		ID:     "edge-reviewer-skill",
+		Source: nodeeditor.Endpoint{Node: "reviewer-skill", Port: "prompt_out"},
+		Target: nodeeditor.Endpoint{Node: "agent-main", Port: "prompt_4"},
+	})
+	if err := nodeeditor.WriteBlueprint(config.DefaultBlueprintPath, blueprint); err != nil {
+		t.Fatal(err)
+	}
+
+	rt := newAgentRuntime(config, nil, nil)
+	prompt := rt.getSystemPrompt([]string{"read_file"})
+	if !strings.Contains(prompt, "Check edge cases.") {
+		t.Fatalf("expected skill file content in prompt: %s", prompt)
+	}
+}
+
 func TestRuntimeFallsBackWhenBlueprintDisabled(t *testing.T) {
 	workdir := t.TempDir()
 	config := testConfig(workdir)

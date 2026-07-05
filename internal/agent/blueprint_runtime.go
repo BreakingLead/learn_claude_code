@@ -103,6 +103,19 @@ func (rt *agentRuntime) promptBlocksForBlueprintNode(node nodeeditor.Node, toolN
 			Source:  "blueprint inline",
 			Content: content,
 		}}
+	case "skill_file", "file":
+		path := strings.TrimSpace(stringConfig(node.Config, "path"))
+		if path == "" {
+			return nil
+		}
+		if !filepath.IsAbs(path) {
+			path = filepath.Join(rt.config.Workdir, path)
+		}
+		return readPromptFiles([]promptFileCandidate{{
+			module: node.ID,
+			name:   name,
+			path:   path,
+		}}, 12000)
 	case "active_mode":
 		mode := rt.activeMode()
 		content := strings.TrimSpace(mode.Prompt)

@@ -115,6 +115,8 @@ BEE_AGENT_NODE_EDITOR=1 go run ./cmd/bee-agent
 
 默认地址是 `http://127.0.0.1:8787`，可以用 `BEE_AGENT_NODE_EDITOR_ADDR=:8787` 修改。当前 Web UI 从后端 node template registry 加载 Prompt/Skill/Toolset/Memory 节点模板，支持新增节点、编辑节点 label/config、拖动节点保存位置、按 typed ports 连线、编辑 JSON、保存和校验。
 
+Skill Node 支持两种配置：`{"source":"inline","prompt":"..."}` 直接写提示词，或 `{"source":"skill_file","path":".agents/skills/name/SKILL.md"}` 引用本地 skill 文件。
+
 实验性 runtime assembly：
 
 ```bash

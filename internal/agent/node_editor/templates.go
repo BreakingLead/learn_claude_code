@@ -28,7 +28,11 @@ func BuiltinNodeTemplates() []NodeTemplate {
 				Type:    "skill",
 				Label:   "Skill",
 				Outputs: []Port{{ID: "prompt_out", Type: PortTypePrompt, Label: "Prompt", Direction: DirectionOutput}},
-				Config:  map[string]any{"source": "inline", "prompt": "Write skill instructions here."},
+				Config: map[string]any{
+					"source": "inline",
+					"prompt": "Write skill instructions here.",
+					"path":   ".agents/skills/example/SKILL.md",
+				},
 			},
 		},
 		{
