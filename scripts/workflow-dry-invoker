@@ -1,0 +1,54 @@
+#!/usr/bin/env node
+// Example external AgentInvoker for the node editor workflow runner.
+//
+// The workflow runner sends one AgentInvocation JSON object to stdin for each
+// agent node. This script returns an AgentInvocationResult JSON object on
+// stdout. It intentionally does not call a model; it proves the external
+// command boundary.
+
+let raw = "";
+process.stdin.setEncoding("utf8");
+process.stdin.on("data", (chunk) => {
+  raw += chunk;
+});
+
+process.stdin.on("end", () => {
+  let invocation;
+  try {
+    invocation = JSON.parse(raw || "{}");
+  } catch (error) {
+    process.stdout.write(JSON.stringify({
+      content: "",
+      diagnostics: [`invalid invocation JSON: ${error.message}`],
+    }) + "\n");
+    process.exitCode = 1;
+    return;
+  }
+
+  const run = invocation.run || {};
+  const inputs = Array.isArray(invocation.inputs) ? invocation.inputs : [];
+  const label = run.label || run.node_id || "agent";
+  const blueprint = run.blueprint_id || "unknown";
+  const instruction = run.instruction || "";
+  const tools = Array.isArray(run.tool_names) ? run.tool_names : [];
+
+  const lines = [`[External dry invoker ${label} via ${blueprint}]`];
+  if (instruction) lines.push(`Instruction: ${instruction}`);
+  if (tools.length > 0) lines.push(`Tools: ${tools.join(", ")}`);
+  if (inputs.length > 0) {
+    lines.push("Inputs:");
+    for (const item of inputs) {
+      const source = `${item.from_node || "?"}.${item.from_port || "?"}`;
+      const target = item.target_port || "input";
+      const content = item.content || "";
+      lines.push(`- ${source} -> ${target}: ${content}`);
+    }
+  } else {
+    lines.push("Inputs: (none)");
+  }
+
+  process.stdout.write(JSON.stringify({
+    content: lines.join("\n"),
+    diagnostics: ["scripts/workflow-dry-invoker handled invocation without model calls"],
+  }) + "\n");
+});

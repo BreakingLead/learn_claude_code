@@ -155,3 +155,33 @@ func TestExternalCommandAgentInvokerUsesJSONBoundary(t *testing.T) {
 		t.Fatalf("external command did not receive invocation JSON: %s", string(raw))
 	}
 }
+
+func TestExampleWorkflowDryInvokerScript(t *testing.T) {
+	scriptPath := filepath.Join("..", "..", "..", "scripts", "workflow-dry-invoker")
+	if _, err := os.Stat(scriptPath); err != nil {
+		t.Fatal(err)
+	}
+	invoker := ExternalCommandAgentInvoker{Command: []string{scriptPath}}
+
+	result, err := invoker.InvokeAgent(context.Background(), AgentInvocation{
+		Run: WorkflowCompiledRun{
+			NodeID:      "developer",
+			Label:       "Developer Agent",
+			BlueprintID: "default",
+			Instruction: "Implement the change.",
+			ToolNames:   []string{"read_file"},
+		},
+		Inputs: []WorkflowPlanRunInput{{
+			FromNode: "prompt", FromPort: "message", TargetPort: "input", Content: "build the API",
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(result.Content, "External dry invoker Developer Agent") {
+		t.Fatalf("unexpected script content: %+v", result)
+	}
+	if !strings.Contains(result.Content, "build the API") {
+		t.Fatalf("expected script to include invocation input: %+v", result)
+	}
+}

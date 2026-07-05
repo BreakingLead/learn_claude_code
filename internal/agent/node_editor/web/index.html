@@ -612,7 +612,7 @@
         const [compiledPlanPath, setCompiledPlanPath] = useState("");
         const [workflowSimulationInput, setWorkflowSimulationInput] = useState("Describe the change you want this workflow to handle.");
         const [workflowExecutionMode, setWorkflowExecutionMode] = useState("dry_run");
-        const [workflowExternalCommand, setWorkflowExternalCommand] = useState("");
+        const [workflowExternalCommand, setWorkflowExternalCommand] = useState("./scripts/workflow-dry-invoker");
         const activeWorkflowPlan = workflowPlans.find((plan) => plan.id === activeWorkflowPlanId) || null;
         const activeWorkflowRun = workflowRuns.find((run) => run.id === activeWorkflowRunId) || null;
         const selectedWorkflowNode = (() => {
