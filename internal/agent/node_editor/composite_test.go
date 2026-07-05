@@ -1,6 +1,7 @@
 package nodeeditor
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -77,6 +78,21 @@ func TestExpandCompositesRejectsCycles(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "composite cycle") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestExampleCompositeDefinitionIsValid(t *testing.T) {
+	path := filepath.Join("..", "..", "..", ".agents", "blueprints", "composites", "safe-readonly-workspace.json")
+	definition, err := ReadComposite(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ValidateComposite(definition); err != nil {
+		t.Fatal(err)
+	}
+	template := CompositeNodeTemplate(definition)
+	if template.Type != NodeTypeComposite || len(template.Node.Outputs) != 2 {
+		t.Fatalf("unexpected composite template: %+v", template)
 	}
 }
 

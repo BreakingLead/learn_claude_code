@@ -117,7 +117,7 @@ BEE_AGENT_NODE_EDITOR=1 go run ./cmd/bee-agent
 
 Skill Node 支持两种配置：`{"source":"inline","prompt":"..."}` 直接写提示词，或 `{"source":"skill_file","path":".agents/skills/name/SKILL.md"}` 引用本地 skill 文件。
 
-Composite Node 定义存放在 `.agents/blueprints/composites/*.json`，可以把一组节点打包成可复用节点。后端会在校验和实验性 runtime assembly 时展开 composite，并检测循环引用和最大展开深度。
+Composite Node 定义存放在 `.agents/blueprints/composites/*.json`，可以把一组节点打包成可复用节点。仓库自带 `safe-readonly-workspace.json` 作为示例；后端会在校验和实验性 runtime assembly 时展开 composite，并检测循环引用和最大展开深度。
 
 实验性 runtime assembly：
 

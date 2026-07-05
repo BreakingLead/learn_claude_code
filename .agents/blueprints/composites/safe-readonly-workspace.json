@@ -1,0 +1,81 @@
+{
+  "version": 1,
+  "id": "safe-readonly-workspace",
+  "name": "Safe Readonly Workspace",
+  "outputs": [
+    {
+      "port": {
+        "id": "prompt_out",
+        "type": "prompt",
+        "label": "Prompt",
+        "direction": "output"
+      },
+      "endpoint": {
+        "node": "readonly-policy-prompt",
+        "port": "prompt_out"
+      }
+    },
+    {
+      "port": {
+        "id": "toolset_out",
+        "type": "toolset",
+        "label": "Toolset",
+        "direction": "output"
+      },
+      "endpoint": {
+        "node": "readonly-tools",
+        "port": "toolset_out"
+      }
+    }
+  ],
+  "nodes": [
+    {
+      "id": "readonly-policy-prompt",
+      "type": "prompt",
+      "label": "Readonly Policy Prompt",
+      "position": {
+        "x": 80,
+        "y": 80
+      },
+      "outputs": [
+        {
+          "id": "prompt_out",
+          "type": "prompt",
+          "label": "Prompt",
+          "direction": "output"
+        }
+      ],
+      "config": {
+        "source": "inline",
+        "prompt": "You are using a readonly workspace capability. Inspect files and explain changes, but do not modify files."
+      }
+    },
+    {
+      "id": "readonly-tools",
+      "type": "toolset",
+      "label": "Readonly Tools",
+      "position": {
+        "x": 80,
+        "y": 220
+      },
+      "outputs": [
+        {
+          "id": "toolset_out",
+          "type": "toolset",
+          "label": "Toolset",
+          "direction": "output"
+        }
+      ],
+      "config": {
+        "tools": [
+          "read_file",
+          "glob"
+        ]
+      }
+    }
+  ],
+  "edges": [],
+  "metadata": {
+    "purpose": "Example reusable composite node for readonly inspection agents."
+  }
+}
