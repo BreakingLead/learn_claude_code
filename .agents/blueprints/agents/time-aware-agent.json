@@ -1,0 +1,468 @@
+{
+  "version": 1,
+  "id": "time-aware-agent",
+  "name": "Time Aware Agent",
+  "root_agent": "agent-main",
+  "nodes": [
+    {
+      "id": "agent-main",
+      "type": "agent",
+      "label": "Time Aware Agent",
+      "position": {
+        "x": 860,
+        "y": 180
+      },
+      "inputs": [
+        {
+          "id": "prompt_1",
+          "type": "prompt",
+          "label": "Prompt 1",
+          "direction": "input",
+          "order": 1
+        },
+        {
+          "id": "prompt_2",
+          "type": "prompt",
+          "label": "Prompt 2",
+          "direction": "input",
+          "order": 2
+        },
+        {
+          "id": "prompt_3",
+          "type": "prompt",
+          "label": "Prompt 3",
+          "direction": "input",
+          "order": 3
+        },
+        {
+          "id": "toolset_in",
+          "type": "toolset",
+          "label": "Tools",
+          "direction": "input",
+          "multiple": true
+        }
+      ],
+      "config": {
+        "display_name": "Time Aware Agent"
+      }
+    },
+    {
+      "id": "project-context",
+      "type": "prompt",
+      "label": "Project Context",
+      "position": {
+        "x": 100,
+        "y": 70
+      },
+      "outputs": [
+        {
+          "id": "prompt_out",
+          "type": "prompt",
+          "label": "Prompt",
+          "direction": "output"
+        }
+      ],
+      "config": {
+        "source": "project_files",
+        "files": [
+          "AGENTS.md",
+          "README.md"
+        ]
+      }
+    },
+    {
+      "id": "active-mode",
+      "type": "prompt",
+      "label": "Active Mode",
+      "position": {
+        "x": 100,
+        "y": 210
+      },
+      "outputs": [
+        {
+          "id": "prompt_out",
+          "type": "prompt",
+          "label": "Prompt",
+          "direction": "output"
+        }
+      ],
+      "config": {
+        "source": "active_mode"
+      }
+    },
+    {
+      "id": "core-tools",
+      "type": "toolset",
+      "label": "Core Tools",
+      "position": {
+        "x": 100,
+        "y": 360
+      },
+      "outputs": [
+        {
+          "id": "toolset_out",
+          "type": "toolset",
+          "label": "Toolset",
+          "direction": "output"
+        }
+      ],
+      "config": {
+        "tools": [
+          "bash",
+          "read_file",
+          "glob"
+        ]
+      }
+    },
+    {
+      "id": "current-time",
+      "type": "time",
+      "label": "Current Time",
+      "position": {
+        "x": 100,
+        "y": 560
+      },
+      "outputs": [
+        {
+          "id": "value",
+          "type": "value",
+          "label": "Time",
+          "direction": "output"
+        }
+      ],
+      "config": {
+        "unit": "hour"
+      }
+    },
+    {
+      "id": "compare-day-start",
+      "type": "compare",
+      "label": "After 09:00?",
+      "position": {
+        "x": 330,
+        "y": 500
+      },
+      "inputs": [
+        {
+          "id": "a",
+          "type": "value",
+          "label": "A",
+          "direction": "input"
+        },
+        {
+          "id": "b",
+          "type": "value",
+          "label": "B",
+          "direction": "input"
+        }
+      ],
+      "outputs": [
+        {
+          "id": "result",
+          "type": "boolean",
+          "label": "Result",
+          "direction": "output"
+        }
+      ],
+      "config": {
+        "operator": ">=",
+        "b": 9
+      }
+    },
+    {
+      "id": "compare-evening-start",
+      "type": "compare",
+      "label": "After 18:00?",
+      "position": {
+        "x": 330,
+        "y": 680
+      },
+      "inputs": [
+        {
+          "id": "a",
+          "type": "value",
+          "label": "A",
+          "direction": "input"
+        },
+        {
+          "id": "b",
+          "type": "value",
+          "label": "B",
+          "direction": "input"
+        }
+      ],
+      "outputs": [
+        {
+          "id": "result",
+          "type": "boolean",
+          "label": "Result",
+          "direction": "output"
+        }
+      ],
+      "config": {
+        "operator": ">=",
+        "b": 18
+      }
+    },
+    {
+      "id": "daytime-prompt",
+      "type": "prompt",
+      "label": "Daytime Prompt",
+      "position": {
+        "x": 330,
+        "y": 210
+      },
+      "outputs": [
+        {
+          "id": "prompt_out",
+          "type": "prompt",
+          "label": "Prompt",
+          "direction": "output"
+        }
+      ],
+      "config": {
+        "source": "inline",
+        "prompt": "Daytime behavior: be direct and execution-oriented. Prefer concise implementation steps, call out risky assumptions early, and keep the interaction optimized for active work hours."
+      }
+    },
+    {
+      "id": "night-prompt",
+      "type": "prompt",
+      "label": "Night Prompt",
+      "position": {
+        "x": 330,
+        "y": 320
+      },
+      "outputs": [
+        {
+          "id": "prompt_out",
+          "type": "prompt",
+          "label": "Prompt",
+          "direction": "output"
+        }
+      ],
+      "config": {
+        "source": "inline",
+        "prompt": "Night behavior: slow down, summarize context before action, avoid unnecessary broad changes, and ask for confirmation before starting long or noisy work."
+      }
+    },
+    {
+      "id": "select-day-window",
+      "type": "select",
+      "label": "09:00-18:00 Select",
+      "position": {
+        "x": 580,
+        "y": 440
+      },
+      "inputs": [
+        {
+          "id": "condition",
+          "type": "boolean",
+          "label": "Condition",
+          "direction": "input"
+        },
+        {
+          "id": "true",
+          "type": "prompt",
+          "label": "True",
+          "direction": "input"
+        },
+        {
+          "id": "false",
+          "type": "prompt",
+          "label": "False",
+          "direction": "input"
+        }
+      ],
+      "outputs": [
+        {
+          "id": "prompt_out",
+          "type": "prompt",
+          "label": "Prompt",
+          "direction": "output"
+        }
+      ],
+      "config": {
+        "default": false
+      }
+    },
+    {
+      "id": "select-evening",
+      "type": "select",
+      "label": "Evening Override",
+      "position": {
+        "x": 690,
+        "y": 600
+      },
+      "inputs": [
+        {
+          "id": "condition",
+          "type": "boolean",
+          "label": "Condition",
+          "direction": "input"
+        },
+        {
+          "id": "true",
+          "type": "prompt",
+          "label": "True",
+          "direction": "input"
+        },
+        {
+          "id": "false",
+          "type": "prompt",
+          "label": "False",
+          "direction": "input"
+        }
+      ],
+      "outputs": [
+        {
+          "id": "prompt_out",
+          "type": "prompt",
+          "label": "Prompt",
+          "direction": "output"
+        }
+      ],
+      "config": {
+        "default": false
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "edge-project-agent",
+      "source": {
+        "node": "project-context",
+        "port": "prompt_out"
+      },
+      "target": {
+        "node": "agent-main",
+        "port": "prompt_1"
+      }
+    },
+    {
+      "id": "edge-mode-agent",
+      "source": {
+        "node": "active-mode",
+        "port": "prompt_out"
+      },
+      "target": {
+        "node": "agent-main",
+        "port": "prompt_2"
+      }
+    },
+    {
+      "id": "edge-time-compare-day",
+      "source": {
+        "node": "current-time",
+        "port": "value"
+      },
+      "target": {
+        "node": "compare-day-start",
+        "port": "a"
+      }
+    },
+    {
+      "id": "edge-time-compare-evening",
+      "source": {
+        "node": "current-time",
+        "port": "value"
+      },
+      "target": {
+        "node": "compare-evening-start",
+        "port": "a"
+      }
+    },
+    {
+      "id": "edge-compare-day-select",
+      "source": {
+        "node": "compare-day-start",
+        "port": "result"
+      },
+      "target": {
+        "node": "select-day-window",
+        "port": "condition"
+      }
+    },
+    {
+      "id": "edge-day-prompt-select",
+      "source": {
+        "node": "daytime-prompt",
+        "port": "prompt_out"
+      },
+      "target": {
+        "node": "select-day-window",
+        "port": "true"
+      }
+    },
+    {
+      "id": "edge-night-prompt-select-day",
+      "source": {
+        "node": "night-prompt",
+        "port": "prompt_out"
+      },
+      "target": {
+        "node": "select-day-window",
+        "port": "false"
+      }
+    },
+    {
+      "id": "edge-compare-evening-select",
+      "source": {
+        "node": "compare-evening-start",
+        "port": "result"
+      },
+      "target": {
+        "node": "select-evening",
+        "port": "condition"
+      }
+    },
+    {
+      "id": "edge-night-prompt-select-evening",
+      "source": {
+        "node": "night-prompt",
+        "port": "prompt_out"
+      },
+      "target": {
+        "node": "select-evening",
+        "port": "true"
+      }
+    },
+    {
+      "id": "edge-day-window-select-evening",
+      "source": {
+        "node": "select-day-window",
+        "port": "prompt_out"
+      },
+      "target": {
+        "node": "select-evening",
+        "port": "false"
+      }
+    },
+    {
+      "id": "edge-time-select-agent",
+      "source": {
+        "node": "select-evening",
+        "port": "prompt_out"
+      },
+      "target": {
+        "node": "agent-main",
+        "port": "prompt_3"
+      }
+    },
+    {
+      "id": "edge-tools-agent",
+      "source": {
+        "node": "core-tools",
+        "port": "toolset_out"
+      },
+      "target": {
+        "node": "agent-main",
+        "port": "toolset_in"
+      }
+    }
+  ],
+  "metadata": {
+    "purpose": "example: choose different prompt blocks by current time",
+    "time_window": "09:00-18:00 uses daytime prompt; otherwise uses night prompt"
+  }
+}
