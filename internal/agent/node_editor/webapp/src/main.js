@@ -13,6 +13,27 @@ import {
   useEdgesState,
   useNodesState,
 } from "@xyflow/react";
+import {
+  Boxes,
+  CheckCircle2,
+  ClipboardCheck,
+  Copy,
+  FileJson,
+  GitBranch,
+  Layers,
+  ListChecks,
+  MemoryStick,
+  MessageSquareText,
+  Play,
+  Plus,
+  RefreshCw,
+  Save,
+  ShieldCheck,
+  Sparkles,
+  Trash2,
+  UserRound,
+  Wrench,
+} from "lucide-react";
 
 const portColors = {
   prompt: "#b57cff",
@@ -21,6 +42,39 @@ const portColors = {
   output: "#aeb7c6",
   message: "#f4b860",
 };
+
+const iconSize = 15;
+
+const templateIcons = {
+  agent: UserRound,
+  prompt: MessageSquareText,
+  skill: Sparkles,
+  toolset: Wrench,
+  memory: MemoryStick,
+  policy: ShieldCheck,
+  composite: Boxes,
+};
+
+function iconElement(Icon, key = "icon") {
+  return React.createElement(Icon, {
+    "aria-hidden": true,
+    className: "button-icon",
+    key,
+    size: iconSize,
+    strokeWidth: 2,
+  });
+}
+
+function buttonContent(Icon, label) {
+  return [
+    iconElement(Icon),
+    React.createElement("span", { className: "button-label", key: "label" }, label),
+  ];
+}
+
+function nodeTemplateIcon(template) {
+  return templateIcons[template.type] || templateIcons[template.node?.type] || Layers;
+}
 
 function BlueprintNode({ data }) {
   const inputs = data.inputs || [];
@@ -1660,48 +1714,51 @@ function App() {
         React.createElement("option", { key: item.id, value: item.id }, item.name ? `${item.name} (${item.id})` : item.id)
       )),
       React.createElement("div", { className: "actions", key: "blueprint-actions" }, [
-        React.createElement("button", { key: "new", onClick: () => createBlueprint("") }, "New"),
+        React.createElement("button", { key: "new", onClick: () => createBlueprint("") }, buttonContent(Plus, "New")),
         React.createElement("button", {
           key: "duplicate",
           disabled: !activeBlueprintId,
           onClick: () => createBlueprint(activeBlueprintId),
-        }, "Duplicate"),
+        }, buttonContent(Copy, "Duplicate")),
       ]),
-      React.createElement("div", { className: "actions", key: "palette" },
-        templates.map((template) =>
-          React.createElement("button", {
-            key: `add-${template.type}-${template.node?.config?.definition || template.label}`,
-            title: template.description || template.label,
-            onClick: () => addNode(template),
-          }, `+ ${template.label}`)
-        )
-      ),
       React.createElement("div", { className: "status", key: "status" }, status),
     ]),
     React.createElement("div", { className: "layout", key: "layout" }, [
-      React.createElement("div", { className: "graph", key: "graph" },
+      React.createElement("div", { className: "graph", key: "graph" }, [
+        React.createElement("div", { className: "node-palette", key: "palette" }, [
+          React.createElement("div", { className: "node-palette-title", key: "title" }, "Nodes"),
+          ...templates.map((template) =>
+            React.createElement("button", {
+              className: "node-palette-button",
+              key: `add-${template.type}-${template.node?.config?.definition || template.label}`,
+              title: template.description || template.label,
+              onClick: () => addNode(template),
+            }, buttonContent(nodeTemplateIcon(template), template.label))
+          ),
+        ]),
         React.createElement(ReactFlow, {
-          nodes,
-          edges,
-          nodeTypes,
-          onNodesChange,
-          onEdgesChange,
-          onConnect: connect,
-          onEdgesDelete: deleteEdges,
-          onNodeClick: selectNode,
-          onSelectionChange: selectNodes,
-          onPaneClick: () => {
-            setSelectedNodeId("");
-            setSelectedNodeIds([]);
-          },
-          onNodeDragStop: updateNodePosition,
-          isValidConnection: validConnection,
-          fitView: true,
-        }, [
-          React.createElement(Background, { key: "background", color: "#303746" }),
-          React.createElement(Controls, { key: "controls" }),
-        ])
-      ),
+            nodes,
+            edges,
+            nodeTypes,
+            onNodesChange,
+            onEdgesChange,
+            onConnect: connect,
+            onEdgesDelete: deleteEdges,
+            onNodeClick: selectNode,
+            onSelectionChange: selectNodes,
+            onPaneClick: () => {
+              setSelectedNodeId("");
+              setSelectedNodeIds([]);
+            },
+            onNodeDragStop: updateNodePosition,
+            isValidConnection: validConnection,
+            fitView: true,
+          }, [
+            React.createElement(Background, { key: "background", color: "#303746" }),
+            React.createElement(Controls, { key: "controls" }),
+          ]
+        ),
+      ]),
       React.createElement("div", {
         className: "panel",
         key: "panel",
@@ -1717,17 +1774,17 @@ function App() {
               key: "blueprint-mode",
               disabled: editorMode === "blueprint",
               onClick: openBlueprintPanel,
-            }, "Blueprint"),
+            }, buttonContent(FileJson, "Blueprint")),
             React.createElement("button", {
               key: "composite-mode",
               disabled: editorMode === "composite" && composites.length === 0,
               onClick: () => openCompositePanel().catch((error) => setStatus(`composite load failed: ${error.message}`)),
-            }, "Composites"),
+            }, buttonContent(Boxes, "Composites")),
             React.createElement("button", {
               key: "workflow-mode",
               disabled: editorMode === "workflow" && workflows.length === 0,
               onClick: () => openWorkflowPanel().catch((error) => setStatus(`workflow load failed: ${error.message}`)),
-            }, "Workflows"),
+            }, buttonContent(GitBranch, "Workflows")),
             editorMode === "composite" && composites.length > 0
               ? React.createElement("select", {
                   key: "composite-select",
@@ -1763,124 +1820,124 @@ function App() {
                   title: activeWorkflowPlan?.stale ? "Saved plan is older than the current workflow JSON." : "Load saved compiled workflow plan.",
                   disabled: !activeWorkflowPlanId,
                   onClick: () => loadWorkflowPlan(activeWorkflowPlanId).catch((error) => setStatus(`workflow plan load failed: ${error.message}`)),
-                }, "Load Plan")
+                }, buttonContent(ClipboardCheck, "Load Plan"))
               : null,
             editorMode === "workflow"
               ? React.createElement("button", {
                   key: "refresh-workflow-plan",
                   disabled: !activeWorkflowPlanId,
                   onClick: refreshWorkflowPlan,
-                }, "Refresh Plan")
+                }, buttonContent(RefreshCw, "Refresh Plan"))
               : null,
             editorMode === "workflow"
               ? React.createElement("button", {
                   key: "run-workflow-plan",
                   disabled: !activeWorkflowPlanId || (workflowExecutionMode === "external_command" && !workflowExternalCommand.trim()),
                   onClick: runWorkflowPlan,
-                }, "Run Plan")
+                }, buttonContent(Play, "Run Plan"))
               : null,
             editorMode === "workflow"
               ? React.createElement("button", {
                   key: "delete-workflow-plan",
                   disabled: !activeWorkflowPlanId,
                   onClick: deleteWorkflowPlan,
-                }, "Delete Plan")
+                }, buttonContent(Trash2, "Delete Plan"))
               : null,
             editorMode === "blueprint"
               ? React.createElement("button", {
                   key: "composite",
                   disabled: selectedNodeIds.length === 0 && !selectedNodeId,
                   onClick: createComposite,
-                }, "Create Composite")
+                }, buttonContent(Boxes, "Create Composite"))
               : null,
             editorMode === "blueprint"
-              ? React.createElement("button", { key: "expand", onClick: expandComposites }, "Expand Composites")
+              ? React.createElement("button", { key: "expand", onClick: expandComposites }, buttonContent(Layers, "Expand Composites"))
               : null,
             editorMode === "blueprint"
-              ? React.createElement("button", { key: "validate", onClick: validate }, "Validate")
+              ? React.createElement("button", { key: "validate", onClick: validate }, buttonContent(CheckCircle2, "Validate"))
               : null,
             editorMode === "workflow"
               ? React.createElement("button", {
                   key: "validate-workflow",
                   disabled: !workflowSource.trim(),
                   onClick: validateWorkflow,
-                }, "Validate Workflow")
+                }, buttonContent(CheckCircle2, "Validate Workflow"))
               : null,
             editorMode === "workflow"
               ? React.createElement("button", {
                   key: "simulate-workflow",
                   disabled: !workflowSource.trim(),
                   onClick: simulateWorkflow,
-                }, "Simulate Workflow")
+                }, buttonContent(Play, "Simulate Workflow"))
               : null,
             editorMode === "workflow"
               ? React.createElement("button", {
                   key: "compile-workflow",
                   disabled: !workflowSource.trim(),
                   onClick: compileWorkflow,
-                }, "Compile Workflow")
+                }, buttonContent(ListChecks, "Compile Workflow"))
               : null,
             editorMode === "workflow"
               ? React.createElement("button", {
                   key: "save-compiled-workflow",
                   disabled: !workflowSource.trim(),
                   onClick: saveCompiledWorkflowPlan,
-                }, "Save Plan")
+                }, buttonContent(Save, "Save Plan"))
               : null,
             editorMode === "workflow"
               ? React.createElement("button", {
                   key: "new-workflow",
                   onClick: () => createWorkflow(""),
-                }, "New Workflow")
+                }, buttonContent(Plus, "New Workflow"))
               : null,
             editorMode === "workflow"
               ? React.createElement("button", {
                   key: "duplicate-workflow",
                   disabled: !activeWorkflowId,
                   onClick: () => createWorkflow(activeWorkflowId),
-                }, "Duplicate Workflow")
+                }, buttonContent(Copy, "Duplicate Workflow"))
               : null,
             editorMode === "workflow"
               ? React.createElement("button", {
                   key: "delete-workflow",
                   disabled: !activeWorkflowId,
                   onClick: deleteWorkflow,
-                }, "Delete Workflow")
+                }, buttonContent(Trash2, "Delete Workflow"))
               : null,
             editorMode === "workflow"
               ? React.createElement("button", {
                   key: "add-workflow-input",
                   disabled: !workflowSource.trim(),
                   onClick: () => addWorkflowNode("workflow-input"),
-                }, "+ Input")
+                }, buttonContent(MessageSquareText, "Input"))
               : null,
             editorMode === "workflow"
               ? React.createElement("button", {
                   key: "add-workflow-agent",
                   disabled: !workflowSource.trim(),
                   onClick: () => addWorkflowNode("workflow-agent"),
-                }, "+ Agent")
+                }, buttonContent(UserRound, "Agent"))
               : null,
             editorMode === "workflow"
               ? React.createElement("button", {
                   key: "add-workflow-output",
                   disabled: !workflowSource.trim(),
                   onClick: () => addWorkflowNode("workflow-output"),
-                }, "+ Output")
+                }, buttonContent(FileJson, "Output"))
               : null,
             editorMode === "blueprint"
-              ? React.createElement("button", { key: "save", onClick: save }, "Save")
+              ? React.createElement("button", { key: "save", onClick: save }, buttonContent(Save, "Save"))
               : editorMode === "workflow"
               ? React.createElement("button", {
                   key: "save-workflow",
                   disabled: !workflowSource.trim(),
                   onClick: saveWorkflow,
-                }, "Save Workflow")
+                }, buttonContent(Save, "Save Workflow"))
               : React.createElement("button", {
                   key: "save-composite",
                   disabled: !compositeSource.trim(),
                   onClick: saveComposite,
-                }, "Save Composite"),
+                }, buttonContent(Save, "Save Composite")),
           ]),
         ]),
         editorMode === "blueprint"
@@ -1911,7 +1968,7 @@ function App() {
                         key: "set-root",
                         disabled: blueprint.root_agent === selectedNode.id,
                         onClick: setSelectedAgentAsRoot,
-                      }, "Set Root"),
+                      }, buttonContent(UserRound, "Set Root")),
                     ]),
                   ])
                 : null,
@@ -2000,7 +2057,7 @@ function App() {
               ]),
               selectedNode.id === blueprint.root_agent
                 ? React.createElement("div", { className: "muted", key: "agent-note" }, "Root agent cannot be deleted.")
-                : React.createElement("button", { key: "delete", onClick: deleteSelectedNode }, "Delete Node"),
+                : React.createElement("button", { key: "delete", onClick: deleteSelectedNode }, buttonContent(Trash2, "Delete Node")),
             ]
           : [React.createElement("div", { className: "muted", key: "empty-selection" }, "Select a node to edit its label and config.")])
             ])
@@ -2032,25 +2089,25 @@ function App() {
                   disabled: !activeWorkflowPlanId || !activeWorkflowRunId,
                   title: activeWorkflowRun?.output || "Load saved workflow run.",
                   onClick: () => loadWorkflowRun(activeWorkflowPlanId, activeWorkflowRunId).catch((error) => setStatus(`workflow run load failed: ${error.message}`)),
-                }, "Load Run"),
+                }, buttonContent(ClipboardCheck, "Load Run")),
                 React.createElement("button", {
                   key: "rerun",
                   disabled: !activeWorkflowPlanId || !activeWorkflowRunId,
                   title: "Run the current saved plan with this run's saved input and execution settings.",
                   onClick: rerunWorkflowRun,
-                }, "Rerun"),
+                }, buttonContent(RefreshCw, "Rerun")),
                 React.createElement("button", {
                   key: "report",
                   disabled: !activeWorkflowPlanId || !activeWorkflowRunId,
                   title: "Download this workflow run as a Markdown evidence report.",
                   onClick: downloadWorkflowRunReport,
-                }, "Download Report"),
+                }, buttonContent(FileJson, "Download Report")),
                 React.createElement("button", {
                   key: "delete",
                   disabled: !activeWorkflowPlanId || !activeWorkflowRunId,
                   title: "Delete saved workflow run.",
                   onClick: deleteWorkflowRun,
-                }, "Delete Run"),
+                }, buttonContent(Trash2, "Delete Run")),
               ]),
               React.createElement("div", { className: "field", key: "simulation-input" }, [
                 React.createElement("label", { key: "label" }, "Simulation Input"),
@@ -2145,7 +2202,7 @@ function App() {
                     React.createElement("button", {
                       key: "delete-workflow-node",
                       onClick: deleteSelectedWorkflowNode,
-                    }, "Delete Workflow Node"),
+                    }, buttonContent(Trash2, "Delete Workflow Node")),
                   ]
                 : [React.createElement("div", { className: "muted", key: "empty-workflow-selection" }, "Select a workflow node to edit it.")]),
             ])
