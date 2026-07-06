@@ -96,6 +96,43 @@ body {
   white-space: nowrap;
 }
 
+.selection-help {
+  position: absolute;
+  left: 14px;
+  bottom: 14px;
+  z-index: 8;
+  border: 1px solid #303746;
+  border-radius: 6px;
+  padding: 7px 10px;
+  background: rgba(17, 19, 24, 0.88);
+  color: #aab2c0;
+  font-size: 12px;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.22);
+  backdrop-filter: blur(8px);
+}
+
+.selection-toolbar {
+  position: absolute;
+  left: 198px;
+  top: 14px;
+  z-index: 9;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid #3b4352;
+  border-radius: 8px;
+  padding: 8px;
+  background: rgba(21, 25, 34, 0.96);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.32);
+  backdrop-filter: blur(8px);
+}
+
+.selection-toolbar-title {
+  color: #cbd2dd;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
 .panel {
   display: grid;
   grid-template-rows: auto minmax(120px, var(--inspector-height, 260px)) 7px minmax(0, 1fr);

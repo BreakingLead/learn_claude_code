@@ -1736,6 +1736,23 @@ function App() {
             }, buttonContent(nodeTemplateIcon(template), template.label))
           ),
         ]),
+        editorMode === "blueprint"
+          ? React.createElement("div", { className: "selection-help", key: "selection-help" },
+              "按住 Shift 拖拽框选节点"
+            )
+          : null,
+        editorMode === "blueprint" && selectedNodeIds.length > 0
+          ? React.createElement("div", { className: "selection-toolbar", key: "selection-toolbar" }, [
+              React.createElement("div", { className: "selection-toolbar-title", key: "title" },
+                `${selectedNodeIds.length} node${selectedNodeIds.length === 1 ? "" : "s"} selected`
+              ),
+              React.createElement("button", {
+                key: "create-composite",
+                title: "Create a reusable composite from the selected nodes.",
+                onClick: createComposite,
+              }, buttonContent(Boxes, "Create Composite")),
+            ])
+          : null,
         React.createElement(ReactFlow, {
             nodes,
             edges,
@@ -1752,6 +1769,8 @@ function App() {
             },
             onNodeDragStop: updateNodePosition,
             isValidConnection: validConnection,
+            selectionKeyCode: "Shift",
+            selectionOnDrag: false,
             fitView: true,
           }, [
             React.createElement(Background, { key: "background", color: "#303746" }),
