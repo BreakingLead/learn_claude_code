@@ -422,6 +422,8 @@ function App() {
   const [activeWorkflowRunId, setActiveWorkflowRunId] = useState("");
   const [editorMode, setEditorMode] = useState("blueprint");
   const [validationResult, setValidationResult] = useState(null);
+  const [blueprintRunInput, setBlueprintRunInput] = useState("Describe what this agent would do with the current repository.");
+  const [blueprintRunResult, setBlueprintRunResult] = useState(null);
   const [workflowValidationResult, setWorkflowValidationResult] = useState(null);
   const [workflowSimulationResult, setWorkflowSimulationResult] = useState(null);
   const [workflowCompileResult, setWorkflowCompileResult] = useState(null);
@@ -485,6 +487,7 @@ function App() {
     setNodes(toFlowNodes(next));
     setEdges(toFlowEdges(next));
     setValidationResult(null);
+    setBlueprintRunResult(null);
     if (message) setStatus(message);
   }, [pushBlueprintUndo, setEdges, setNodes]);
 
@@ -1170,6 +1173,26 @@ function App() {
     }
   };
 
+  const dryRunBlueprint = async () => {
+    try {
+      const next = parseSource();
+      const response = await fetch(`/api/blueprints/${next.id}/dry-run`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ blueprint: next, input: blueprintRunInput }),
+      });
+      const result = await response.json();
+      setBlueprintRunResult(result);
+      if (!response.ok || !result.ok) {
+        setStatus(`blueprint dry-run failed: ${result.error || response.statusText}`);
+        return;
+      }
+      setStatus(`blueprint dry-run ready: ${result.agent?.id || "agent"}; tools(${(result.tool_names || []).length})`);
+    } catch (error) {
+      setStatus(`blueprint dry-run failed: ${error.message}`);
+    }
+  };
+
   const expandComposites = async () => {
     try {
       const next = parseSource();
@@ -1195,6 +1218,58 @@ function App() {
     } catch (error) {
       setStatus(`expand failed: ${error.message}`);
     }
+  };
+
+  const renderBlueprintRunResult = () => {
+    if (!blueprintRunResult) return null;
+    if (!blueprintRunResult.ok) {
+      return React.createElement("div", { className: "validation", key: "blueprint-run" }, [
+        React.createElement("div", { className: "validation-title", key: "title" }, "Blueprint Dry Run"),
+        React.createElement("div", { className: "diagnostics", key: "error" },
+          blueprintRunResult.error || "Blueprint dry-run failed."
+        ),
+      ]);
+    }
+    const tools = blueprintRunResult.tool_names || [];
+    const promptBlocks = blueprintRunResult.prompt_blocks || [];
+    const diagnostics = blueprintRunResult.diagnostics || [];
+    return React.createElement("div", { className: "validation", key: "blueprint-run" }, [
+      React.createElement("div", { className: "validation-title", key: "title" },
+        `Dry run: ${blueprintRunResult.agent?.id || "agent"}`
+      ),
+      React.createElement("pre", { className: "code-preview dry-run-output", key: "output" },
+        blueprintRunResult.output || "(no output)"
+      ),
+      React.createElement("div", { className: "muted", key: "tools-label" }, `Tools (${tools.length})`),
+      tools.length > 0
+        ? React.createElement("div", { className: "chip-row", key: "tools" },
+            tools.map((tool) => React.createElement("span", { className: "chip", key: tool }, tool))
+          )
+        : React.createElement("div", { className: "muted", key: "no-tools" }, "No tools resolved."),
+      promptBlocks.length > 0
+        ? React.createElement("div", { className: "field", key: "prompt-blocks" }, [
+            React.createElement("label", { key: "label" }, "Prompt blocks"),
+            ...promptBlocks.map((block, index) =>
+              React.createElement("pre", { className: "code-preview", key: `${block.node_id}-${index}` },
+                `${index + 1}. ${block.name || block.node_id} [${block.source || "(unknown)"}]\n${block.preview || "(empty)"}`
+              )
+            ),
+          ])
+        : React.createElement("div", { className: "muted", key: "no-prompts" }, "No prompt blocks resolved."),
+      blueprintRunResult.system_prompt
+        ? React.createElement("div", { className: "field", key: "system-prompt" }, [
+            React.createElement("label", { key: "label" }, "System prompt preview"),
+            React.createElement("pre", { className: "code-preview system-prompt-preview", key: "prompt" },
+              blueprintRunResult.system_prompt
+            ),
+          ])
+        : null,
+      diagnostics.length > 0
+        ? React.createElement("div", { className: "diagnostics", key: "diagnostics" },
+            diagnostics.map((item, index) => React.createElement("div", { key: `diagnostic-${index}` }, item))
+          )
+        : null,
+    ]);
   };
 
   const renderValidationResult = () => {
@@ -2012,6 +2087,13 @@ function App() {
               ? React.createElement("button", { key: "expand", onClick: expandComposites }, buttonContent(Layers, "Expand Composites"))
               : null,
             editorMode === "blueprint"
+              ? React.createElement("button", {
+                  key: "dry-run",
+                  disabled: !source.trim(),
+                  onClick: dryRunBlueprint,
+                }, buttonContent(Play, "Run Blueprint"))
+              : null,
+            editorMode === "blueprint"
               ? React.createElement("button", { key: "validate", onClick: validate }, buttonContent(CheckCircle2, "Validate"))
               : null,
             editorMode === "workflow"
@@ -2100,6 +2182,23 @@ function App() {
         ]),
         editorMode === "blueprint"
           ? React.createElement("div", { className: "inspector", key: "inspector" }, [
+              React.createElement("div", { className: "field", key: "dry-run-input" }, [
+                React.createElement("label", { key: "label" }, "Dry-run input"),
+                React.createElement("textarea", {
+                  className: "dry-run-input",
+                  key: "input",
+                  value: blueprintRunInput,
+                  onChange: (event) => setBlueprintRunInput(event.target.value),
+                }),
+              ]),
+              React.createElement("div", { className: "actions", key: "dry-run-actions" }, [
+                React.createElement("button", {
+                  key: "run",
+                  disabled: !source.trim(),
+                  onClick: dryRunBlueprint,
+                }, buttonContent(Play, "Run Blueprint")),
+              ]),
+              renderBlueprintRunResult(),
               renderValidationResult(),
               ...(selectedNode
           ? [

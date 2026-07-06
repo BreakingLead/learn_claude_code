@@ -345,6 +345,10 @@ textarea {
   min-height: 82px;
 }
 
+.dry-run-input {
+  min-height: 92px;
+}
+
 .muted {
   color: #818b9d;
   font-size: 12px;
@@ -400,6 +404,11 @@ textarea {
   font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
   font-size: 11px;
   line-height: 1.45;
+}
+
+.dry-run-output,
+.system-prompt-preview {
+  max-height: 220px;
 }
 
 .node {

@@ -84,6 +84,36 @@ func TestServerBlueprintAPI(t *testing.T) {
 	if validation.Runtime.ID != "default" || !strings.Contains(validation.Runtime.Command, "BEE_AGENT_BLUEPRINT_ID=default") {
 		t.Fatalf("expected runtime selector, got %+v", validation.Runtime)
 	}
+
+	dryRunRequest := BlueprintDryRunRequest{
+		Blueprint: blueprint,
+		Input:     "Summarize the current repository.",
+	}
+	raw, err = json.Marshal(dryRunRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err = http.Post(server.URL+"/api/blueprints/default/dry-run", "application/json", bytes.NewReader(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var dryRun BlueprintDryRunResponse
+	if err := json.NewDecoder(resp.Body).Decode(&dryRun); err != nil {
+		t.Fatal(err)
+	}
+	if !dryRun.OK {
+		t.Fatalf("expected dry-run to succeed, got %s", dryRun.Error)
+	}
+	if dryRun.Agent.ID != "agent-main" || len(dryRun.ToolNames) == 0 {
+		t.Fatalf("expected resolved agent and tools, got %+v", dryRun)
+	}
+	if dryRun.Input != dryRunRequest.Input {
+		t.Fatalf("expected input to round-trip, got %q", dryRun.Input)
+	}
+	if !strings.Contains(dryRun.SystemPrompt, "dry-run preview mode") || !strings.Contains(dryRun.Output, "Dry run only") {
+		t.Fatalf("expected dry-run preview content, got system=%q output=%q", dryRun.SystemPrompt, dryRun.Output)
+	}
 }
 
 func TestServerCreateBlueprintAPI(t *testing.T) {

@@ -108,6 +108,23 @@ type BlueprintValidationResponse struct {
 	Runtime      BlueprintRuntimeSelector `json:"runtime,omitempty"`
 }
 
+type BlueprintDryRunRequest struct {
+	Blueprint Blueprint `json:"blueprint"`
+	Input     string    `json:"input,omitempty"`
+}
+
+type BlueprintDryRunResponse struct {
+	OK           bool                    `json:"ok"`
+	Error        string                  `json:"error,omitempty"`
+	Diagnostics  []string                `json:"diagnostics,omitempty"`
+	Agent        ResolvedAgentDefinition `json:"agent,omitempty"`
+	ToolNames    []string                `json:"tool_names,omitempty"`
+	PromptBlocks []PromptPreviewBlock    `json:"prompt_blocks,omitempty"`
+	Input        string                  `json:"input,omitempty"`
+	SystemPrompt string                  `json:"system_prompt,omitempty"`
+	Output       string                  `json:"output,omitempty"`
+}
+
 type WorkflowValidationResponse struct {
 	OK          bool                      `json:"ok"`
 	Error       string                    `json:"error,omitempty"`
@@ -512,6 +529,87 @@ func (s *Store) ValidateBlueprintForRuntime(blueprint Blueprint) BlueprintValida
 		PromptBlocks: PromptPreview(expanded, resolved),
 		Runtime:      s.RuntimeSelector(blueprint.ID),
 	}
+}
+
+func (s *Store) DryRunBlueprint(request BlueprintDryRunRequest) BlueprintDryRunResponse {
+	validation := s.ValidateBlueprintForRuntime(request.Blueprint)
+	if !validation.OK {
+		return BlueprintDryRunResponse{OK: false, Error: validation.Error}
+	}
+	diagnostics := append([]string{}, validation.Diagnostics...)
+	diagnostics = append(diagnostics, validation.Capabilities.Diagnostics...)
+	response := BlueprintDryRunResponse{
+		OK:           true,
+		Diagnostics:  diagnostics,
+		Agent:        validation.Resolved,
+		ToolNames:    append([]string(nil), validation.Capabilities.ToolNames...),
+		PromptBlocks: append([]PromptPreviewBlock(nil), validation.PromptBlocks...),
+		Input:        strings.TrimSpace(request.Input),
+	}
+	response.SystemPrompt = dryRunSystemPrompt(request.Blueprint, response)
+	response.Output = dryRunAssistantOutput(request.Blueprint, response)
+	return response
+}
+
+func dryRunSystemPrompt(blueprint Blueprint, run BlueprintDryRunResponse) string {
+	var builder strings.Builder
+	builder.WriteString("You are Bee Agent running in dry-run preview mode.\n")
+	builder.WriteString("This preview resolves the node graph and shows the request shape. It does not call a model or execute tools.\n\n")
+	builder.WriteString("Agent: ")
+	builder.WriteString(run.Agent.Name)
+	if run.Agent.Name != "" && run.Agent.ID != "" {
+		builder.WriteString(" (")
+		builder.WriteString(run.Agent.ID)
+		builder.WriteString(")")
+	} else if run.Agent.ID != "" {
+		builder.WriteString(run.Agent.ID)
+	}
+	builder.WriteString("\nBlueprint: ")
+	builder.WriteString(blueprint.Name)
+	if blueprint.Name != "" && blueprint.ID != "" {
+		builder.WriteString(" (")
+		builder.WriteString(blueprint.ID)
+		builder.WriteString(")")
+	} else if blueprint.ID != "" {
+		builder.WriteString(blueprint.ID)
+	}
+	builder.WriteString("\n\nAvailable tools:\n")
+	if len(run.ToolNames) == 0 {
+		builder.WriteString("- (none)\n")
+	} else {
+		for _, tool := range run.ToolNames {
+			builder.WriteString("- ")
+			builder.WriteString(tool)
+			builder.WriteByte('\n')
+		}
+	}
+	builder.WriteString("\nPrompt blocks:\n")
+	if len(run.PromptBlocks) == 0 {
+		builder.WriteString("- (none)\n")
+	} else {
+		for index, block := range run.PromptBlocks {
+			builder.WriteString(fmt.Sprintf("%d. %s [%s]\n", index+1, block.Name, block.Source))
+			builder.WriteString("   ")
+			builder.WriteString(block.Preview)
+			builder.WriteByte('\n')
+		}
+	}
+	return builder.String()
+}
+
+func dryRunAssistantOutput(blueprint Blueprint, run BlueprintDryRunResponse) string {
+	input := strings.TrimSpace(run.Input)
+	if input == "" {
+		input = "(empty input)"
+	}
+	return fmt.Sprintf(
+		"Dry run only. Blueprint %q resolves root agent %q with %d prompt block(s) and %d tool(s). User input preview: %q.",
+		blueprint.ID,
+		run.Agent.ID,
+		len(run.PromptBlocks),
+		len(run.ToolNames),
+		truncatePreview(input, 180),
+	)
 }
 
 func (s *Store) CreateAgent(request CreateBlueprintRequest) (Blueprint, error) {
@@ -939,6 +1037,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/blueprints/{id}", s.handleGetBlueprint)
 	mux.HandleFunc("PUT /api/blueprints/{id}", s.handlePutBlueprint)
 	mux.HandleFunc("POST /api/blueprints/{id}/validate", s.handleValidateBlueprint)
+	mux.HandleFunc("POST /api/blueprints/{id}/dry-run", s.handleDryRunBlueprint)
 	mux.HandleFunc("GET /api/composites", s.handleListComposites)
 	mux.HandleFunc("GET /api/composites/{id}", s.handleGetComposite)
 	mux.HandleFunc("PUT /api/composites/{id}", s.handlePutComposite)
@@ -1034,6 +1133,19 @@ func (s *Server) handleValidateBlueprint(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	writeJSON(w, http.StatusOK, s.store.ValidateBlueprintForRuntime(blueprint))
+}
+
+func (s *Server) handleDryRunBlueprint(w http.ResponseWriter, r *http.Request) {
+	request, err := decodeBlueprintDryRunRequest(r.Body)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, BlueprintDryRunResponse{OK: false, Error: err.Error()})
+		return
+	}
+	if safeID(request.Blueprint.ID) != safeID(r.PathValue("id")) {
+		writeJSON(w, http.StatusBadRequest, BlueprintDryRunResponse{OK: false, Error: "blueprint id does not match route id"})
+		return
+	}
+	writeJSON(w, http.StatusOK, s.store.DryRunBlueprint(request))
 }
 
 func (s *Server) handleListComposites(w http.ResponseWriter, r *http.Request) {
@@ -1347,6 +1459,17 @@ func decodeCreateBlueprint(body io.Reader) (CreateBlueprintRequest, error) {
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&request); err != nil {
 		return CreateBlueprintRequest{}, err
+	}
+	return request, nil
+}
+
+func decodeBlueprintDryRunRequest(body io.Reader) (BlueprintDryRunRequest, error) {
+	defer io.Copy(io.Discard, body)
+	var request BlueprintDryRunRequest
+	decoder := json.NewDecoder(body)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&request); err != nil {
+		return BlueprintDryRunRequest{}, err
 	}
 	return request, nil
 }
