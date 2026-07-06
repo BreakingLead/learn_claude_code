@@ -23,23 +23,39 @@ func (rt *agentRuntime) agentLoop(ctx context.Context, client anthropic.Client, 
 func Run() {
 	godotenv.Load()
 
-	// 创建 Anthropic 客户端
-	opts := []option.RequestOption{}
-	if base := os.Getenv("ANTHROPIC_BASE_URL"); base != "" {
-		opts = append(opts, option.WithBaseURL(base))
-	}
-	client := anthropic.NewClient(opts...)
 	ctx := context.Background()
 	if truthyEnv("BEE_AGENT_NODE_EDITOR") {
 		runNodeEditor()
 		return
 	}
+	// 普通 TUI 首次启动时先补齐必要配置，再创建客户端和运行时。
+	if !truthyEnv("BEE_AGENT_TELEGRAM") {
+		result, err := runStartupConfigIfNeeded()
+		if err != nil {
+			fmt.Println(colorRed("Startup config error: " + err.Error()))
+			return
+		}
+		if result.Cancelled {
+			fmt.Println("Startup cancelled.")
+			return
+		}
+	}
+
+	client := newAnthropicClientFromEnv()
 	if truthyEnv("BEE_AGENT_TELEGRAM") {
 		runTelegram(ctx, client)
 		return
 	}
 
 	runTUI(ctx, client)
+}
+
+func newAnthropicClientFromEnv() anthropic.Client {
+	opts := []option.RequestOption{}
+	if base := os.Getenv("ANTHROPIC_BASE_URL"); base != "" {
+		opts = append(opts, option.WithBaseURL(base))
+	}
+	return anthropic.NewClient(opts...)
 }
 
 func runNodeEditor() {
