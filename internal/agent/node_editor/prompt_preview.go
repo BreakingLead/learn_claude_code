@@ -1,8 +1,10 @@
 package nodeeditor
 
 import (
+	"fmt"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 type PromptPreviewBlock struct {
@@ -16,7 +18,23 @@ func PromptPreview(blueprint Blueprint, resolved ResolvedAgentDefinition) []Prom
 	nodes := nodeMap(blueprint)
 	var blocks []PromptPreviewBlock
 	for _, nodeID := range resolved.PromptNodes {
-		if node, ok := nodes[nodeID]; ok {
+		source := ResolvePromptSource(blueprint, nodeID, EvaluationContext{Now: time.Now()})
+		if !source.OK {
+			continue
+		}
+		node := source.Node
+		if node.ID != nodeID {
+			selectedBy := nodeID
+			if selectNode, ok := nodes[nodeID]; ok && strings.TrimSpace(selectNode.Label) != "" {
+				selectedBy = selectNode.Label
+			}
+			for _, block := range promptPreviewForNode(node) {
+				block.Name = fmt.Sprintf("%s via %s", block.Name, selectedBy)
+				blocks = append(blocks, block)
+			}
+			continue
+		}
+		if _, ok := nodes[nodeID]; ok {
 			blocks = append(blocks, promptPreviewForNode(node)...)
 		}
 	}

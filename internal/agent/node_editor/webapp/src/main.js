@@ -24,6 +24,9 @@ import {
   ListChecks,
   MemoryStick,
   MessageSquareText,
+  Clock,
+  GitCompareArrows,
+  Split,
   Play,
   Plus,
   RefreshCw,
@@ -43,6 +46,8 @@ const portColors = {
   memory: "#61d394",
   output: "#aeb7c6",
   message: "#f4b860",
+  value: "#f2c94c",
+  boolean: "#eb5757",
 };
 
 const iconSize = 15;
@@ -55,6 +60,9 @@ const templateIcons = {
   memory: MemoryStick,
   policy: ShieldCheck,
   composite: Boxes,
+  time: Clock,
+  compare: GitCompareArrows,
+  select: Split,
 };
 
 function iconElement(Icon, key = "icon") {
@@ -351,6 +359,9 @@ const fallbackTemplates = [
   { type: "toolset", label: "Toolset", node: { type: "toolset", label: "Toolset", outputs: [{ id: "toolset_out", type: "toolset", label: "Toolset", direction: "output" }], config: { tools: ["read_file", "glob"] } } },
   { type: "memory", label: "Memory", node: { type: "memory", label: "Memory", outputs: [{ id: "memory_out", type: "memory", label: "Memory", direction: "output" }], config: { source: "default_memory", path: ".agents/.memory/MEMORY.md" } } },
   { type: "policy", label: "Policy", node: { type: "policy", label: "Policy", inputs: [{ id: "toolset_in", type: "toolset", label: "Tools In", direction: "input", multiple: true }], outputs: [{ id: "toolset_out", type: "toolset", label: "Tools Out", direction: "output" }, { id: "prompt_out", type: "prompt", label: "Prompt", direction: "output" }], config: { allow_tools: [], deny_tools: ["write_file", "edit_file"], prompt: "Follow this policy before using tools." } } },
+  { type: "time", label: "Current Time", node: { type: "time", label: "Current Time", outputs: [{ id: "value", type: "value", label: "Time", direction: "output" }], config: { unit: "hour" } } },
+  { type: "compare", label: "Math Compare", node: { type: "compare", label: "Math Compare", inputs: [{ id: "a", type: "value", label: "A", direction: "input" }, { id: "b", type: "value", label: "B", direction: "input" }], outputs: [{ id: "result", type: "boolean", label: "Result", direction: "output" }], config: { operator: ">=", a: 0, b: 0 } } },
+  { type: "select", label: "Select", node: { type: "select", label: "Select", inputs: [{ id: "condition", type: "boolean", label: "Condition", direction: "input" }, { id: "true", type: "prompt", label: "True", direction: "input" }, { id: "false", type: "prompt", label: "False", direction: "input" }], outputs: [{ id: "prompt_out", type: "prompt", label: "Prompt", direction: "output" }], config: { default: false } } },
 ];
 
 function nodeFromTemplate(template, blueprint) {

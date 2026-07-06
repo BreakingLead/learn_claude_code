@@ -95,6 +95,56 @@ func BuiltinNodeTemplates() []NodeTemplate {
 				},
 			},
 		},
+		{
+			Type:        NodeTypeTime,
+			Label:       "Current Time",
+			Description: "Output the current time as a value socket.",
+			Node: Node{
+				Type:    NodeTypeTime,
+				Label:   "Current Time",
+				Outputs: []Port{{ID: "value", Type: PortTypeValue, Label: "Time", Direction: DirectionOutput}},
+				Config: map[string]any{
+					"unit": "hour",
+				},
+			},
+		},
+		{
+			Type:        NodeTypeCompare,
+			Label:       "Math Compare",
+			Description: "Compare two numeric values and output a boolean socket.",
+			Node: Node{
+				Type:  NodeTypeCompare,
+				Label: "Math Compare",
+				Inputs: []Port{
+					{ID: "a", Type: PortTypeValue, Label: "A", Direction: DirectionInput},
+					{ID: "b", Type: PortTypeValue, Label: "B", Direction: DirectionInput},
+				},
+				Outputs: []Port{{ID: "result", Type: PortTypeBoolean, Label: "Result", Direction: DirectionOutput}},
+				Config: map[string]any{
+					"operator": ">=",
+					"a":        0,
+					"b":        0,
+				},
+			},
+		},
+		{
+			Type:        NodeTypeSelect,
+			Label:       "Select",
+			Description: "Choose one prompt input based on a boolean condition.",
+			Node: Node{
+				Type:  NodeTypeSelect,
+				Label: "Select",
+				Inputs: []Port{
+					{ID: "condition", Type: PortTypeBoolean, Label: "Condition", Direction: DirectionInput},
+					{ID: "true", Type: PortTypePrompt, Label: "True", Direction: DirectionInput},
+					{ID: "false", Type: PortTypePrompt, Label: "False", Direction: DirectionInput},
+				},
+				Outputs: []Port{{ID: "prompt_out", Type: PortTypePrompt, Label: "Prompt", Direction: DirectionOutput}},
+				Config: map[string]any{
+					"default": false,
+				},
+			},
+		},
 	}
 }
 

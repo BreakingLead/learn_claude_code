@@ -309,6 +309,74 @@ func TestRuntimeInjectsBlueprintPolicyPrompt(t *testing.T) {
 	}
 }
 
+func TestRuntimeInjectsSelectedBlueprintPrompt(t *testing.T) {
+	workdir := t.TempDir()
+	config := testConfig(workdir)
+	config.UseBlueprint = true
+	blueprint := nodeeditor.DefaultBlueprint()
+	blueprint.Nodes = append(blueprint.Nodes,
+		nodeeditor.Node{
+			ID:       "compare",
+			Type:     nodeeditor.NodeTypeCompare,
+			Label:    "Compare",
+			Position: nodeeditor.Position{X: 260, Y: 560},
+			Inputs: []nodeeditor.Port{
+				{ID: "a", Type: nodeeditor.PortTypeValue, Label: "A", Direction: nodeeditor.DirectionInput},
+				{ID: "b", Type: nodeeditor.PortTypeValue, Label: "B", Direction: nodeeditor.DirectionInput},
+			},
+			Outputs: []nodeeditor.Port{{ID: "result", Type: nodeeditor.PortTypeBoolean, Label: "Result", Direction: nodeeditor.DirectionOutput}},
+			Config:  map[string]any{"operator": ">=", "a": 2, "b": 1},
+		},
+		nodeeditor.Node{
+			ID:       "true-prompt",
+			Type:     nodeeditor.NodeTypePrompt,
+			Label:    "True Prompt",
+			Position: nodeeditor.Position{X: 80, Y: 520},
+			Outputs:  []nodeeditor.Port{{ID: "prompt_out", Type: nodeeditor.PortTypePrompt, Label: "Prompt", Direction: nodeeditor.DirectionOutput}},
+			Config:   map[string]any{"source": "inline", "prompt": "Selected true branch."},
+		},
+		nodeeditor.Node{
+			ID:       "false-prompt",
+			Type:     nodeeditor.NodeTypePrompt,
+			Label:    "False Prompt",
+			Position: nodeeditor.Position{X: 80, Y: 640},
+			Outputs:  []nodeeditor.Port{{ID: "prompt_out", Type: nodeeditor.PortTypePrompt, Label: "Prompt", Direction: nodeeditor.DirectionOutput}},
+			Config:   map[string]any{"source": "inline", "prompt": "Selected false branch."},
+		},
+		nodeeditor.Node{
+			ID:       "select",
+			Type:     nodeeditor.NodeTypeSelect,
+			Label:    "Select",
+			Position: nodeeditor.Position{X: 480, Y: 580},
+			Inputs: []nodeeditor.Port{
+				{ID: "condition", Type: nodeeditor.PortTypeBoolean, Label: "Condition", Direction: nodeeditor.DirectionInput},
+				{ID: "true", Type: nodeeditor.PortTypePrompt, Label: "True", Direction: nodeeditor.DirectionInput},
+				{ID: "false", Type: nodeeditor.PortTypePrompt, Label: "False", Direction: nodeeditor.DirectionInput},
+			},
+			Outputs: []nodeeditor.Port{{ID: "prompt_out", Type: nodeeditor.PortTypePrompt, Label: "Prompt", Direction: nodeeditor.DirectionOutput}},
+			Config:  map[string]any{"default": false},
+		},
+	)
+	blueprint.Edges = append(blueprint.Edges,
+		nodeeditor.Edge{ID: "edge-compare-select", Source: nodeeditor.Endpoint{Node: "compare", Port: "result"}, Target: nodeeditor.Endpoint{Node: "select", Port: "condition"}},
+		nodeeditor.Edge{ID: "edge-true-select", Source: nodeeditor.Endpoint{Node: "true-prompt", Port: "prompt_out"}, Target: nodeeditor.Endpoint{Node: "select", Port: "true"}},
+		nodeeditor.Edge{ID: "edge-false-select", Source: nodeeditor.Endpoint{Node: "false-prompt", Port: "prompt_out"}, Target: nodeeditor.Endpoint{Node: "select", Port: "false"}},
+		nodeeditor.Edge{ID: "edge-select-agent", Source: nodeeditor.Endpoint{Node: "select", Port: "prompt_out"}, Target: nodeeditor.Endpoint{Node: "agent-main", Port: "prompt_3"}},
+	)
+	if err := nodeeditor.WriteBlueprint(config.DefaultBlueprintPath, blueprint); err != nil {
+		t.Fatal(err)
+	}
+
+	rt := newAgentRuntime(config, nil, nil)
+	prompt := rt.getSystemPrompt([]string{"read_file"})
+	if !strings.Contains(prompt, "Selected true branch.") {
+		t.Fatalf("expected selected true branch content: %s", prompt)
+	}
+	if strings.Contains(prompt, "Selected false branch.") {
+		t.Fatalf("unexpected false branch content: %s", prompt)
+	}
+}
+
 func TestRuntimeFallsBackWhenBlueprintDisabled(t *testing.T) {
 	workdir := t.TempDir()
 	config := testConfig(workdir)

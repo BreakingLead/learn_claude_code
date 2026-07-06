@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 type runtimeBlueprint struct {
@@ -65,11 +66,17 @@ func (rt *agentRuntime) blueprintPromptBlocks(toolNames []string) ([]PromptBlock
 	nodes := blueprintNodeMap(rt.blueprint.Graph)
 	var blocks []PromptBlock
 	for _, nodeID := range rt.blueprint.Resolved.PromptNodes {
-		node, ok := nodes[nodeID]
-		if !ok {
+		source := nodeeditor.ResolvePromptSource(rt.blueprint.Graph, nodeID, nodeeditor.EvaluationContext{Now: time.Now()})
+		if !source.OK {
 			continue
 		}
-		blocks = append(blocks, rt.promptBlocksForBlueprintNode(node, toolNames)...)
+		selectedBlocks := rt.promptBlocksForBlueprintNode(source.Node, toolNames)
+		if source.Node.ID != nodeID {
+			for index := range selectedBlocks {
+				selectedBlocks[index].Name = fmt.Sprintf("%s via %s", selectedBlocks[index].Name, nodeID)
+			}
+		}
+		blocks = append(blocks, selectedBlocks...)
 	}
 	for _, nodeID := range rt.blueprint.Resolved.MemoryNodes {
 		node, ok := nodes[nodeID]

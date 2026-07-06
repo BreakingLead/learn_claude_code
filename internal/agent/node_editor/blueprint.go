@@ -18,12 +18,17 @@ const (
 	NodeTypeMemory    = "memory"
 	NodeTypePolicy    = "policy"
 	NodeTypeComposite = "composite"
+	NodeTypeTime      = "time"
+	NodeTypeCompare   = "compare"
+	NodeTypeSelect    = "select"
 
 	PortTypePrompt  = "prompt"
 	PortTypeToolset = "toolset"
 	PortTypeMemory  = "memory"
 	PortTypeOutput  = "output"
 	PortTypeMessage = "message"
+	PortTypeValue   = "value"
+	PortTypeBoolean = "boolean"
 
 	DirectionInput  = "input"
 	DirectionOutput = "output"
