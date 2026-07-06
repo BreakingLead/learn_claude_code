@@ -259,6 +259,20 @@ function splitTemplates(templates) {
   return { builtin, composites };
 }
 
+function cloneDocument(document) {
+  return document ? JSON.parse(JSON.stringify(document)) : null;
+}
+
+function sameDocument(left, right) {
+  return JSON.stringify(left || null) === JSON.stringify(right || null);
+}
+
+function isTextEditingTarget(target) {
+  if (!target || !(target instanceof Element)) return false;
+  const tagName = target.tagName.toLowerCase();
+  return tagName === "input" || tagName === "textarea" || tagName === "select" || target.isContentEditable;
+}
+
 function compositePortQueues(mappings) {
   const result = new Map();
   (mappings || []).forEach((mapping) => {
@@ -418,6 +432,11 @@ function App() {
   const [workflowExternalCommand, setWorkflowExternalCommand] = useState("./scripts/workflow-dry-invoker");
   const [workflowTimeoutMS, setWorkflowTimeoutMS] = useState(30000);
   const [paletteSections, setPaletteSections] = useState({ nodes: true, composites: true });
+  const [blueprintUndoStack, setBlueprintUndoStack] = useState([]);
+  const blueprintRef = useRef(null);
+  const blueprintUndoStackRef = useRef([]);
+  const selectedNodeIdRef = useRef("");
+  const selectedNodeIdsRef = useRef([]);
   const panelRef = useRef(null);
   const [panelInspectorHeight, setPanelInspectorHeight] = useState(260);
   const [panelResizing, setPanelResizing] = useState(false);
@@ -438,20 +457,70 @@ function App() {
     setPaletteSections((current) => ({ ...current, [section]: !current[section] }));
   }, []);
 
-  const updateDocument = useCallback((next, message) => {
+  const pushBlueprintUndo = useCallback((snapshot) => {
+    const nextStack = [...blueprintUndoStackRef.current, snapshot].slice(-50);
+    blueprintUndoStackRef.current = nextStack;
+    setBlueprintUndoStack(nextStack);
+  }, []);
+
+  const clearBlueprintUndo = useCallback(() => {
+    blueprintUndoStackRef.current = [];
+    setBlueprintUndoStack([]);
+  }, []);
+
+  const updateDocument = useCallback((next, message, options = {}) => {
+    const recordUndo = options.recordUndo !== false;
+    const current = blueprintRef.current;
+    if (recordUndo && current && !sameDocument(current, next)) {
+      pushBlueprintUndo({
+        document: cloneDocument(current),
+        selectedNodeId: selectedNodeIdRef.current,
+        selectedNodeIds: [...selectedNodeIdsRef.current],
+        label: message || "edit",
+      });
+    }
+    blueprintRef.current = next;
     setBlueprint(next);
     setSource(JSON.stringify(next, null, 2));
     setNodes(toFlowNodes(next));
     setEdges(toFlowEdges(next));
     setValidationResult(null);
     if (message) setStatus(message);
-  }, [setEdges, setNodes]);
+  }, [pushBlueprintUndo, setEdges, setNodes]);
 
-  const setBlueprintDocument = useCallback((next, message) => {
-    updateDocument(next, message);
+  const setBlueprintDocument = useCallback((next, message, options = {}) => {
+    updateDocument(next, message, { recordUndo: false, ...options });
+    if (options.clearUndo) {
+      clearBlueprintUndo();
+    }
     setSelectedNodeId((id) => id && !(next.nodes || []).some((node) => node.id === id) ? "" : id);
     setSelectedNodeIds((ids) => ids.filter((id) => (next.nodes || []).some((node) => node.id === id)));
+  }, [clearBlueprintUndo, updateDocument]);
+
+  const restoreBlueprintSnapshot = useCallback((snapshot) => {
+    if (!snapshot?.document) return;
+    updateDocument(snapshot.document, `undid ${snapshot.label || "edit"}`, { recordUndo: false });
+    const nodeIDs = new Set((snapshot.document.nodes || []).map((node) => node.id));
+    const restoredIds = (snapshot.selectedNodeIds || []).filter((id) => nodeIDs.has(id));
+    const restoredId = nodeIDs.has(snapshot.selectedNodeId) ? snapshot.selectedNodeId : restoredIds[0] || "";
+    setSelectedNodeId(restoredId);
+    setSelectedNodeIds(restoredIds.length > 0 ? restoredIds : (restoredId ? [restoredId] : []));
   }, [updateDocument]);
+
+  const undoBlueprintEdit = useCallback(() => {
+    if (editorMode !== "blueprint") return false;
+    const stack = blueprintUndoStackRef.current;
+    const snapshot = stack[stack.length - 1];
+    if (!snapshot) {
+      setStatus("nothing to undo");
+      return false;
+    }
+    const nextStack = stack.slice(0, -1);
+    blueprintUndoStackRef.current = nextStack;
+    setBlueprintUndoStack(nextStack);
+    restoreBlueprintSnapshot(snapshot);
+    return true;
+  }, [editorMode, restoreBlueprintSnapshot]);
 
   const updateWorkflowDocument = useCallback((next, message) => {
     setWorkflowSource(JSON.stringify(next, null, 2));
@@ -473,7 +542,7 @@ function App() {
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || response.statusText);
     setActiveBlueprintId(data.id);
-    setBlueprintDocument(data, `loaded ${data.id}`);
+    setBlueprintDocument(data, `loaded ${data.id}`, { clearUndo: true });
   }, [setBlueprintDocument]);
 
   const loadBlueprints = useCallback(async () => {
@@ -734,6 +803,27 @@ function App() {
   }, [selectedNodeId]);
 
   useEffect(() => {
+    selectedNodeIdRef.current = selectedNodeId;
+    selectedNodeIdsRef.current = selectedNodeIds;
+  }, [selectedNodeId, selectedNodeIds]);
+
+  useEffect(() => {
+    const onKeyDown = (event) => {
+      if (!(event.ctrlKey || event.metaKey) || event.shiftKey || event.key.toLowerCase() !== "z") {
+        return;
+      }
+      if (isTextEditingTarget(event.target)) {
+        return;
+      }
+      if (undoBlueprintEdit()) {
+        event.preventDefault();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [undoBlueprintEdit]);
+
+  useEffect(() => {
     if (!panelResizing) return undefined;
     const move = (event) => {
       const panel = panelRef.current;
@@ -771,7 +861,7 @@ function App() {
 
   const parseSource = () => {
     const next = JSON.parse(source);
-    setBlueprintDocument(next);
+    setBlueprintDocument(next, undefined, { clearUndo: false });
     return next;
   };
 
@@ -848,9 +938,8 @@ function App() {
           : item
       ),
     };
-    setBlueprint(next);
-    setSource(JSON.stringify(next, null, 2));
-  }, [blueprint, editorMode, updateWorkflowDocument, workflowSource]);
+    updateDocument(next, "moved node");
+  }, [blueprint, editorMode, updateDocument, updateWorkflowDocument, workflowSource]);
 
   const deleteEdges = useCallback((deleted) => {
     if (editorMode === "workflow") {
@@ -872,10 +961,9 @@ function App() {
       ...blueprint,
       edges: (blueprint.edges || []).filter((edge) => !deletedIDs.has(edge.id)),
     };
-    setBlueprint(next);
-    setSource(JSON.stringify(next, null, 2));
+    updateDocument(next, "edge removed");
     setStatus("edge removed");
-  }, [blueprint, editorMode, updateWorkflowDocument, workflowSource]);
+  }, [blueprint, editorMode, updateDocument, updateWorkflowDocument, workflowSource]);
 
   const selectNode = useCallback((_, node) => {
     setSelectedNodeId(node.id);
@@ -1193,7 +1281,7 @@ function App() {
       }
       await loadBlueprints();
       setActiveBlueprintId(result.blueprint.id);
-      setBlueprintDocument(result.blueprint, `created ${result.blueprint.id}`);
+      setBlueprintDocument(result.blueprint, `created ${result.blueprint.id}`, { clearUndo: true });
     } catch (error) {
       setStatus(`create failed: ${error.message}`);
     }
