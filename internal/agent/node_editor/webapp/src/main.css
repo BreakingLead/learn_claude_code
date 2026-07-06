@@ -78,12 +78,37 @@ body {
   backdrop-filter: blur(8px);
 }
 
-.node-palette-title {
+.node-palette-section {
+  justify-content: flex-start;
+  width: 100%;
+  height: 28px;
+  border-color: transparent;
+  padding: 0 4px;
+  background: transparent;
   color: #aab2c0;
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0;
   text-transform: uppercase;
+}
+
+.node-palette-section:hover {
+  background: #1d222c;
+}
+
+.node-palette-items {
+  display: grid;
+  gap: 6px;
+}
+
+.node-palette-count {
+  margin-left: auto;
+  border: 1px solid #394151;
+  border-radius: 999px;
+  padding: 1px 6px;
+  color: #cbd2dd;
+  font-size: 11px;
+  font-weight: 600;
 }
 
 .node-palette-button {
@@ -94,6 +119,20 @@ body {
   text-align: left;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.composite-asset-button {
+  border-color: #46515f;
+  background: #1f2630;
+}
+
+.node-palette-empty {
+  border: 1px dashed #394151;
+  border-radius: 6px;
+  padding: 8px;
+  color: #818b9d;
+  font-size: 12px;
+  line-height: 1.4;
 }
 
 .selection-help {

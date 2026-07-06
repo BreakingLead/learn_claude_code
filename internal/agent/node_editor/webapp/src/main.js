@@ -31,6 +31,8 @@ import {
   ShieldCheck,
   Sparkles,
   Trash2,
+  ChevronDown,
+  ChevronRight,
   UserRound,
   Wrench,
 } from "lucide-react";
@@ -244,6 +246,19 @@ function endpointKey(endpoint) {
   return `${endpoint.node}:${endpoint.port}`;
 }
 
+function splitTemplates(templates) {
+  const builtin = [];
+  const composites = [];
+  (templates || []).forEach((template) => {
+    if (template.type === "composite" || template.node?.type === "composite") {
+      composites.push(template);
+      return;
+    }
+    builtin.push(template);
+  });
+  return { builtin, composites };
+}
+
 function compositePortQueues(mappings) {
   const result = new Map();
   (mappings || []).forEach((mapping) => {
@@ -402,6 +417,7 @@ function App() {
   const [workflowExecutionMode, setWorkflowExecutionMode] = useState("dry_run");
   const [workflowExternalCommand, setWorkflowExternalCommand] = useState("./scripts/workflow-dry-invoker");
   const [workflowTimeoutMS, setWorkflowTimeoutMS] = useState(30000);
+  const [paletteSections, setPaletteSections] = useState({ nodes: true, composites: true });
   const panelRef = useRef(null);
   const [panelInspectorHeight, setPanelInspectorHeight] = useState(260);
   const [panelResizing, setPanelResizing] = useState(false);
@@ -416,6 +432,11 @@ function App() {
       return null;
     }
   })();
+  const { builtin: builtinTemplates, composites: compositeTemplates } = splitTemplates(templates);
+
+  const togglePaletteSection = useCallback((section) => {
+    setPaletteSections((current) => ({ ...current, [section]: !current[section] }));
+  }, []);
 
   const updateDocument = useCallback((next, message) => {
     setBlueprint(next);
@@ -763,6 +784,7 @@ function App() {
     };
     updateDocument(next, `added ${node.label}`);
     setSelectedNodeId(node.id);
+    setSelectedNodeIds([node.id]);
   }, [blueprint, updateDocument]);
 
   const connect = useCallback((connection) => {
@@ -1726,15 +1748,51 @@ function App() {
     React.createElement("div", { className: "layout", key: "layout" }, [
       React.createElement("div", { className: "graph", key: "graph" }, [
         React.createElement("div", { className: "node-palette", key: "palette" }, [
-          React.createElement("div", { className: "node-palette-title", key: "title" }, "Nodes"),
-          ...templates.map((template) =>
-            React.createElement("button", {
-              className: "node-palette-button",
-              key: `add-${template.type}-${template.node?.config?.definition || template.label}`,
-              title: template.description || template.label,
-              onClick: () => addNode(template),
-            }, buttonContent(nodeTemplateIcon(template), template.label))
-          ),
+          React.createElement("button", {
+            className: "node-palette-section",
+            key: "nodes-title",
+            type: "button",
+            onClick: () => togglePaletteSection("nodes"),
+          }, [
+            iconElement(paletteSections.nodes ? ChevronDown : ChevronRight, "chevron"),
+            React.createElement("span", { key: "label" }, "节点"),
+          ]),
+          paletteSections.nodes
+            ? React.createElement("div", { className: "node-palette-items", key: "node-items" },
+                builtinTemplates.map((template) =>
+                  React.createElement("button", {
+                    className: "node-palette-button",
+                    key: `add-${template.type}-${template.node?.config?.definition || template.label}`,
+                    title: template.description || template.label,
+                    onClick: () => addNode(template),
+                  }, buttonContent(nodeTemplateIcon(template), template.label))
+                )
+              )
+            : null,
+          React.createElement("button", {
+            className: "node-palette-section",
+            key: "composites-title",
+            type: "button",
+            onClick: () => togglePaletteSection("composites"),
+          }, [
+            iconElement(paletteSections.composites ? ChevronDown : ChevronRight, "chevron"),
+            React.createElement("span", { key: "label" }, "Composite 资产库"),
+            React.createElement("span", { className: "node-palette-count", key: "count" }, String(compositeTemplates.length)),
+          ]),
+          paletteSections.composites
+            ? React.createElement("div", { className: "node-palette-items", key: "composite-items" },
+                compositeTemplates.length > 0
+                  ? compositeTemplates.map((template) =>
+                      React.createElement("button", {
+                        className: "node-palette-button composite-asset-button",
+                        key: `add-composite-${template.node?.config?.definition || template.label}`,
+                        title: template.description || template.label,
+                        onClick: () => addNode(template),
+                      }, buttonContent(Boxes, template.label))
+                    )
+                  : React.createElement("div", { className: "node-palette-empty" }, "框选节点后创建 composite。")
+              )
+            : null,
         ]),
         editorMode === "blueprint"
           ? React.createElement("div", { className: "selection-help", key: "selection-help" },
@@ -1861,13 +1919,6 @@ function App() {
                   disabled: !activeWorkflowPlanId,
                   onClick: deleteWorkflowPlan,
                 }, buttonContent(Trash2, "Delete Plan"))
-              : null,
-            editorMode === "blueprint"
-              ? React.createElement("button", {
-                  key: "composite",
-                  disabled: selectedNodeIds.length === 0 && !selectedNodeId,
-                  onClick: createComposite,
-                }, buttonContent(Boxes, "Create Composite"))
               : null,
             editorMode === "blueprint"
               ? React.createElement("button", { key: "expand", onClick: expandComposites }, buttonContent(Layers, "Expand Composites"))
