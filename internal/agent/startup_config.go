@@ -2,9 +2,6 @@ package agent
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
-	"sort"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/textinput"
@@ -27,7 +24,7 @@ type startupPreset struct {
 var startupPresets = []startupPreset{
 	{
 		Name:        "Bee default",
-		Description: "使用项目默认模型 deepseek-v4-flash，base URL 由你的网关或环境决定。",
+		Description: "使用项目默认模型 deepseek-v4-flash；base URL 可在下方手动填写。",
 		Model:       "deepseek-v4-flash",
 	},
 	{
@@ -37,65 +34,30 @@ var startupPresets = []startupPreset{
 	},
 	{
 		Name:        "Custom",
-		Description: "手动输入 MODEL 和可选 ANTHROPIC_BASE_URL。",
+		Description: "手动输入模型和可选 base URL。",
 		Custom:      true,
 	},
 }
 
-func runStartupConfigIfNeeded() (startupConfigResult, error) {
-	if !startupConfigNeeded() {
-		return startupConfigResult{}, nil
+func runStartupConfigIfNeeded(options RunOptions) (RunOptions, startupConfigResult, error) {
+	if !startupConfigNeeded(options) {
+		return options, startupConfigResult{}, nil
 	}
-	model := newStartupConfigModel()
+	model := newStartupConfigModel(options)
 	program := tea.NewProgram(model, tea.WithAltScreen())
 	final, err := program.Run()
 	if err != nil {
-		return startupConfigResult{}, err
+		return options, startupConfigResult{}, err
 	}
 	result, ok := final.(startupConfigModel)
 	if !ok || result.cancelled {
-		return startupConfigResult{Cancelled: true}, nil
+		return options, startupConfigResult{Cancelled: true}, nil
 	}
-	values := result.values()
-	applyStartupConfig(values)
-	if result.saveEnv {
-		if err := writeDotenvValues(dotenvWritePath(), values); err != nil {
-			return startupConfigResult{}, err
-		}
-	}
-	return startupConfigResult{}, nil
+	return result.applyToOptions(options), startupConfigResult{}, nil
 }
 
-func startupConfigNeeded() bool {
-	// MODEL/FALLBACK_MODEL 有运行时默认值；只有真正无法发请求的 API key 缺失时才打断启动。
-	return strings.TrimSpace(os.Getenv("ANTHROPIC_API_KEY")) == ""
-}
-
-func dotenvSearchPaths() []string {
-	wd, err := os.Getwd()
-	if err != nil {
-		return nil
-	}
-	paths := []string{}
-	for dir := wd; ; dir = filepath.Dir(dir) {
-		path := filepath.Join(dir, ".env")
-		if _, err := os.Stat(path); err == nil {
-			paths = append(paths, path)
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			break
-		}
-	}
-	return paths
-}
-
-func dotenvWritePath() string {
-	paths := dotenvSearchPaths()
-	if len(paths) > 0 {
-		return paths[0]
-	}
-	return ".env"
+func startupConfigNeeded(options RunOptions) bool {
+	return strings.TrimSpace(options.APIKey) == ""
 }
 
 type startupInput int
@@ -112,7 +74,6 @@ type startupConfigModel struct {
 	height     int
 	preset     int
 	focus      int
-	saveEnv    bool
 	cancelled  bool
 	apiKey     textinput.Model
 	model      textinput.Model
@@ -120,26 +81,26 @@ type startupConfigModel struct {
 	statusText string
 }
 
-func newStartupConfigModel() startupConfigModel {
+func newStartupConfigModel(options RunOptions) startupConfigModel {
 	apiKey := textinput.New()
-	apiKey.Placeholder = "ANTHROPIC_API_KEY"
+	apiKey.Placeholder = "--api-key"
 	apiKey.EchoMode = textinput.EchoPassword
+	apiKey.SetValue(options.APIKey)
 	apiKey.Width = 48
 
 	model := textinput.New()
-	model.Placeholder = "MODEL"
-	model.SetValue(firstNonEmpty(os.Getenv("MODEL"), startupPresets[0].Model))
+	model.Placeholder = "--model"
+	model.SetValue(firstNonEmpty(options.Model, startupPresets[0].Model))
 	model.Width = 48
 
 	baseURL := textinput.New()
-	baseURL.Placeholder = "ANTHROPIC_BASE_URL（可选）"
-	baseURL.SetValue(os.Getenv("ANTHROPIC_BASE_URL"))
+	baseURL.Placeholder = "--base-url（可选）"
+	baseURL.SetValue(options.BaseURL)
 	baseURL.Width = 48
 
 	return startupConfigModel{
 		styles:  newTUIStyles(),
 		preset:  0,
-		saveEnv: true,
 		apiKey:  apiKey,
 		model:   model,
 		baseURL: baseURL,
@@ -190,10 +151,6 @@ func (m startupConfigModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.applyPreset()
 				return m, nil
 			}
-			if m.focus == 4 {
-				m.saveEnv = !m.saveEnv
-				return m, nil
-			}
 		case "enter":
 			if m.focus < 4 {
 				m.focus++
@@ -241,11 +198,7 @@ func (m startupConfigModel) View() string {
 		presetLines = append(presetLines, style.Render(fmt.Sprintf("%s%s - %s", cursor, preset.Name, preset.Description)))
 	}
 
-	saveMark := "[ ]"
-	if m.saveEnv {
-		saveMark = "[x]"
-	}
-	saveLine := fmt.Sprintf("%s 保存到 .env", saveMark)
+	saveLine := "确认后仅用于本次启动"
 	if m.focus == 4 {
 		saveLine = m.styles.command.Render(saveLine)
 	}
@@ -314,87 +267,19 @@ func (m *startupConfigModel) applyPreset() {
 }
 
 func (m startupConfigModel) validate() error {
-	if strings.TrimSpace(m.apiKey.Value()) == "" && strings.TrimSpace(os.Getenv("ANTHROPIC_API_KEY")) == "" {
-		return fmt.Errorf("请填写 ANTHROPIC_API_KEY")
+	if strings.TrimSpace(m.apiKey.Value()) == "" {
+		return fmt.Errorf("请填写 --api-key")
 	}
 	if strings.TrimSpace(m.model.Value()) == "" {
-		return fmt.Errorf("请填写 MODEL")
+		return fmt.Errorf("请填写 --model")
 	}
 	return nil
 }
 
-func (m startupConfigModel) values() map[string]string {
-	values := map[string]string{
-		"MODEL":              strings.TrimSpace(m.model.Value()),
-		"FALLBACK_MODEL":     strings.TrimSpace(m.model.Value()),
-		"ANTHROPIC_BASE_URL": strings.TrimSpace(m.baseURL.Value()),
-	}
-	if apiKey := strings.TrimSpace(m.apiKey.Value()); apiKey != "" {
-		values["ANTHROPIC_API_KEY"] = apiKey
-	}
-	return values
-}
-
-func applyStartupConfig(values map[string]string) {
-	for key, value := range values {
-		_ = os.Setenv(key, value)
-	}
-}
-
-func writeDotenvValues(path string, values map[string]string) error {
-	existing, _ := os.ReadFile(path)
-	lines := []string{}
-	if len(existing) > 0 {
-		lines = strings.Split(strings.TrimRight(string(existing), "\n"), "\n")
-	}
-
-	seen := map[string]bool{}
-	for i, line := range lines {
-		key, ok := dotenvLineKey(line)
-		if !ok {
-			continue
-		}
-		if value, exists := values[key]; exists {
-			lines[i] = key + "=" + shellQuoteEnvValue(value)
-			seen[key] = true
-		}
-	}
-
-	keys := make([]string, 0, len(values))
-	for key := range values {
-		if !seen[key] {
-			keys = append(keys, key)
-		}
-	}
-	sort.Strings(keys)
-	for _, key := range keys {
-		lines = append(lines, key+"="+shellQuoteEnvValue(values[key]))
-	}
-	return os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0600)
-}
-
-func dotenvLineKey(line string) (string, bool) {
-	trimmed := strings.TrimSpace(line)
-	if trimmed == "" || strings.HasPrefix(trimmed, "#") || !strings.Contains(trimmed, "=") {
-		return "", false
-	}
-	key := strings.TrimSpace(strings.SplitN(trimmed, "=", 2)[0])
-	if key == "" {
-		return "", false
-	}
-	return key, true
-}
-
-func shellQuoteEnvValue(value string) string {
-	if value == "" {
-		return `""`
-	}
-	if strings.IndexFunc(value, func(r rune) bool {
-		return r == '"' || r == '\'' || r == '#' || r == ' ' || r == '\t' || r == '\n'
-	}) == -1 {
-		return value
-	}
-	escaped := strings.ReplaceAll(value, `\`, `\\`)
-	escaped = strings.ReplaceAll(escaped, `"`, `\"`)
-	return `"` + escaped + `"`
+func (m startupConfigModel) applyToOptions(options RunOptions) RunOptions {
+	options.APIKey = strings.TrimSpace(m.apiKey.Value())
+	options.Model = strings.TrimSpace(m.model.Value())
+	options.FallbackModel = strings.TrimSpace(m.model.Value())
+	options.BaseURL = strings.TrimSpace(m.baseURL.Value())
+	return options
 }

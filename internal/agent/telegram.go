@@ -13,7 +13,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -22,7 +21,6 @@ import (
 )
 
 type telegramConfig struct {
-	Enabled      bool
 	Token        string
 	BaseURL      string
 	AllowedChats map[string]bool
@@ -55,17 +53,11 @@ type telegramUpdateHeader struct {
 	} `json:"message"`
 }
 
-func runTelegram(ctx context.Context, client anthropic.Client) {
-	config, err := newAgentConfig()
-	if err != nil {
-		fmt.Println(colorRed("Config error: " + err.Error()))
-		return
-	}
+func runTelegram(ctx context.Context, client anthropic.Client, config agentConfig, telegramConfig telegramConfig) {
 	rt := newAgentRuntime(config, nil, nil)
 	rt.startCronScheduler()
-	telegramConfig := newTelegramConfigFromEnv()
 	if strings.TrimSpace(telegramConfig.Token) == "" {
-		fmt.Println(colorRed("Telegram error: TELEGRAM_BOT_TOKEN is required"))
+		fmt.Println(colorRed("Telegram error: --telegram-token is required"))
 		return
 	}
 	connector := newTelegramConnector(telegramConfig, rt, client, nil)
@@ -75,15 +67,20 @@ func runTelegram(ctx context.Context, client anthropic.Client) {
 	}
 }
 
-func newTelegramConfigFromEnv() telegramConfig {
-	pollInterval := parseDurationEnv("TELEGRAM_POLL_INTERVAL", 2*time.Second)
-	timeout := parseDurationEnv("TELEGRAM_TIMEOUT", 30*time.Second)
-	baseURL := strings.TrimRight(getEnvOr("TELEGRAM_BASE_URL", "https://api.telegram.org"), "/")
+func newTelegramConfigFromOptions(options RunOptions) telegramConfig {
+	baseURL := strings.TrimRight(firstNonEmpty(options.TelegramBaseURL, "https://api.telegram.org"), "/")
+	pollInterval := options.TelegramPollInterval
+	if pollInterval <= 0 {
+		pollInterval = 2 * time.Second
+	}
+	timeout := options.TelegramTimeout
+	if timeout <= 0 {
+		timeout = 30 * time.Second
+	}
 	return telegramConfig{
-		Enabled:      truthyEnv("BEE_AGENT_TELEGRAM"),
-		Token:        os.Getenv("TELEGRAM_BOT_TOKEN"),
+		Token:        strings.TrimSpace(options.TelegramToken),
 		BaseURL:      baseURL,
-		AllowedChats: parseAllowedChats(os.Getenv("TELEGRAM_ALLOWED_CHATS")),
+		AllowedChats: parseAllowedChats(options.TelegramAllowedChats),
 		PollInterval: pollInterval,
 		Timeout:      timeout,
 	}
@@ -298,27 +295,6 @@ func telegramAPIDescription(description string) string {
 		return "telegram api returned ok=false"
 	}
 	return description
-}
-
-func parseDurationEnv(key string, fallback time.Duration) time.Duration {
-	raw := strings.TrimSpace(os.Getenv(key))
-	if raw == "" {
-		return fallback
-	}
-	duration, err := time.ParseDuration(raw)
-	if err != nil {
-		return fallback
-	}
-	return duration
-}
-
-func truthyEnv(key string) bool {
-	switch strings.ToLower(strings.TrimSpace(os.Getenv(key))) {
-	case "1", "true", "yes", "on":
-		return true
-	default:
-		return false
-	}
 }
 
 func telegramSleepContext(ctx context.Context, duration time.Duration) bool {

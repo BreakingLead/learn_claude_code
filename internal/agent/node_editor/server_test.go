@@ -81,7 +81,7 @@ func TestServerBlueprintAPI(t *testing.T) {
 	if len(validation.Diagnostics) != 0 {
 		t.Fatalf("expected no default config diagnostics, got %+v", validation.Diagnostics)
 	}
-	if validation.Runtime.ID != "default" || !strings.Contains(validation.Runtime.Command, "BEE_AGENT_BLUEPRINT_ID=default") {
+	if validation.Runtime.ID != "default" || !strings.Contains(validation.Runtime.Command, "--blueprint-id default") {
 		t.Fatalf("expected runtime selector, got %+v", validation.Runtime)
 	}
 

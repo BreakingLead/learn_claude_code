@@ -2,17 +2,9 @@ package agent
 
 import (
 	"fmt"
-	"os"
 )
 
 // ── 辅助函数 ──────────────────────────────────────────
-
-func getEnvOr(key, fallback string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
-	}
-	return fallback
-}
 
 // ── 终端颜色 ──────────────────────────────────────────
 

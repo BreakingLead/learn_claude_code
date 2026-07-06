@@ -10,8 +10,6 @@ import (
 	"time"
 
 	"github.com/anthropics/anthropic-sdk-go"
-	"github.com/anthropics/anthropic-sdk-go/option"
-	"github.com/joho/godotenv"
 )
 
 // ── 压缩阈值 ──────────────────────────────────────────
@@ -243,14 +241,7 @@ func (rt *agentRuntime) writeTranscript(messages []anthropic.MessageParam) strin
 
 // summarizeHistory 调用模型总结历史
 func (rt *agentRuntime) summarizeHistory(messages []anthropic.MessageParam) string {
-	godotenv.Load()
-
-	opts := []option.RequestOption{}
-	if base := os.Getenv("ANTHROPIC_BASE_URL"); base != "" {
-		opts = append(opts, option.WithBaseURL(base))
-	}
-
-	client := anthropic.NewClient(opts...)
+	client := newAnthropicClient(rt.config)
 	ctx := context.Background()
 
 	conversation, _ := json.Marshal(messages)

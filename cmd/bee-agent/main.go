@@ -1,7 +1,16 @@
 package main
 
-import "bee_agent/internal/agent"
+import (
+	"bee_agent/internal/agent"
+	"fmt"
+	"os"
+)
 
 func main() {
-	agent.Run()
+	options, err := agent.ParseRunOptions(os.Args[1:], os.Stderr)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(2)
+	}
+	agent.Run(options)
 }

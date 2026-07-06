@@ -5,11 +5,9 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"os"
 
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
-	"github.com/joho/godotenv"
 )
 
 // agentLoop 是主 agent 的薄包装；具体执行状态机由 runAgent 统一负责。
@@ -20,17 +18,15 @@ func (rt *agentRuntime) agentLoop(ctx context.Context, client anthropic.Client, 
 
 // ── REPL 入口 ──────────────────────────────────────────
 
-func Run() {
-	loadDotenvFiles()
-
+func Run(options RunOptions) {
 	ctx := context.Background()
-	if truthyEnv("BEE_AGENT_NODE_EDITOR") {
-		runNodeEditor()
+	if options.RunMode == RunModeNodeEditor {
+		runNodeEditor(options)
 		return
 	}
 	// 普通 TUI 首次启动时先补齐必要配置，再创建客户端和运行时。
-	if !truthyEnv("BEE_AGENT_TELEGRAM") {
-		result, err := runStartupConfigIfNeeded()
+	if options.RunMode == RunModeTUI {
+		next, result, err := runStartupConfigIfNeeded(options)
 		if err != nil {
 			fmt.Println(colorRed("Startup config error: " + err.Error()))
 			return
@@ -39,35 +35,39 @@ func Run() {
 			fmt.Println("Startup cancelled.")
 			return
 		}
+		options = next
 	}
 
-	client := newAnthropicClientFromEnv()
-	if truthyEnv("BEE_AGENT_TELEGRAM") {
-		runTelegram(ctx, client)
+	config, err := newAgentConfig(options)
+	if err != nil {
+		fmt.Println(colorRed("Config error: " + err.Error()))
 		return
 	}
-
-	runTUI(ctx, client)
-}
-
-func loadDotenvFiles() {
-	paths := dotenvSearchPaths()
-	if len(paths) == 0 {
+	client := newAnthropicClient(config)
+	switch options.RunMode {
+	case RunModeTelegram:
+		runTelegram(ctx, client, config, newTelegramConfigFromOptions(options))
+	case RunModeTUI:
+		runTUI(ctx, client, config)
+	default:
+		fmt.Println(colorRed("Unknown run mode: " + string(options.RunMode)))
 		return
 	}
-	_ = godotenv.Load(paths...)
 }
 
-func newAnthropicClientFromEnv() anthropic.Client {
+func newAnthropicClient(config agentConfig) anthropic.Client {
 	opts := []option.RequestOption{}
-	if base := os.Getenv("ANTHROPIC_BASE_URL"); base != "" {
-		opts = append(opts, option.WithBaseURL(base))
+	if config.APIKey != "" {
+		opts = append(opts, option.WithAPIKey(config.APIKey))
+	}
+	if config.BaseURL != "" {
+		opts = append(opts, option.WithBaseURL(config.BaseURL))
 	}
 	return anthropic.NewClient(opts...)
 }
 
-func runNodeEditor() {
-	config, err := newAgentConfig()
+func runNodeEditor(options RunOptions) {
+	config, err := newAgentConfig(options)
 	if err != nil {
 		fmt.Println(colorRed("Config error: " + err.Error()))
 		return
@@ -80,7 +80,10 @@ func runNodeEditor() {
 		fmt.Println(colorRed("Workflow error: " + err.Error()))
 		return
 	}
-	addr := getEnvOr("BEE_AGENT_NODE_EDITOR_ADDR", "127.0.0.1:8787")
+	addr := options.NodeEditorAddr
+	if addr == "" {
+		addr = "127.0.0.1:8787"
+	}
 	fmt.Printf("Bee Agent Builder: http://%s\n", addr)
 	if err := http.ListenAndServe(addr, nodeeditor.NewServer(config.Workdir).Handler()); err != nil {
 		fmt.Println(colorRed("Node editor error: " + err.Error()))

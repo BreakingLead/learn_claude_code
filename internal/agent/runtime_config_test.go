@@ -5,24 +5,23 @@ import (
 	"testing"
 )
 
-func TestBlueprintPathFromEnvUsesID(t *testing.T) {
+func TestBlueprintPathFromOptionsUsesID(t *testing.T) {
 	workdir := t.TempDir()
-	t.Setenv("BEE_AGENT_BLUEPRINT_ID", "review-agent")
-	t.Setenv("BEE_AGENT_BLUEPRINT_PATH", "")
 
-	got := blueprintPathFromEnv(workdir)
+	got := blueprintPathFromOptions(workdir, RunOptions{BlueprintID: "review-agent"})
 	want := filepath.Join(workdir, ".agents", "blueprints", "agents", "review-agent.json")
 	if got != want {
 		t.Fatalf("path = %q, want %q", got, want)
 	}
 }
 
-func TestBlueprintPathFromEnvPrefersExplicitPath(t *testing.T) {
+func TestBlueprintPathFromOptionsPrefersExplicitPath(t *testing.T) {
 	workdir := t.TempDir()
-	t.Setenv("BEE_AGENT_BLUEPRINT_ID", "review-agent")
-	t.Setenv("BEE_AGENT_BLUEPRINT_PATH", ".agents/blueprints/agents/custom.json")
 
-	got := blueprintPathFromEnv(workdir)
+	got := blueprintPathFromOptions(workdir, RunOptions{
+		BlueprintID:   "review-agent",
+		BlueprintPath: ".agents/blueprints/agents/custom.json",
+	})
 	want := filepath.Join(workdir, ".agents", "blueprints", "agents", "custom.json")
 	if got != want {
 		t.Fatalf("path = %q, want %q", got, want)

@@ -42,6 +42,8 @@ type agentRuntime struct {
 }
 
 type agentConfig struct {
+	APIKey                string
+	BaseURL               string
 	Model                 string
 	FallbackModel         string
 	Workdir               string
@@ -60,6 +62,8 @@ type agentConfig struct {
 	BlueprintPath         string
 	UseBlueprint          bool
 	ModeConfigPath        string
+	Mode                  string
+	ResumePrompt          bool
 	DefaultTokens         int64
 	EscalatedTokens       int64
 	MaxRecoveryRetries    int
@@ -75,15 +79,17 @@ type promptCache struct {
 	prompt     string
 }
 
-func newAgentConfig() (agentConfig, error) {
+func newAgentConfig(options RunOptions) (agentConfig, error) {
 	workdir, err := os.Getwd()
 	if err != nil {
 		return agentConfig{}, err
 	}
 	compactDir := filepath.Join(workdir, ".agents", "compact")
 	return agentConfig{
-		Model:                 getEnvOr("MODEL", "deepseek-v4-flash"),
-		FallbackModel:         getEnvOr("FALLBACK_MODEL", "deepseek-v4-flash"),
+		APIKey:                strings.TrimSpace(options.APIKey),
+		BaseURL:               strings.TrimSpace(options.BaseURL),
+		Model:                 firstNonEmpty(options.Model, "deepseek-v4-flash"),
+		FallbackModel:         firstNonEmpty(options.FallbackModel, options.Model, "deepseek-v4-flash"),
 		Workdir:               workdir,
 		CompactDir:            compactDir,
 		ToolResultsDir:        filepath.Join(compactDir, "tool_results"),
@@ -97,9 +103,11 @@ func newAgentConfig() (agentConfig, error) {
 		TeamMessagesPath:      filepath.Join(workdir, ".agents", "team", "messages.jsonl"),
 		SessionDir:            filepath.Join(workdir, ".agents", "sessions"),
 		DefaultBlueprintPath:  nodeeditor.DefaultBlueprintPath(workdir),
-		BlueprintPath:         blueprintPathFromEnv(workdir),
-		UseBlueprint:          truthyEnv("BEE_AGENT_USE_BLUEPRINT"),
+		BlueprintPath:         blueprintPathFromOptions(workdir, options),
+		UseBlueprint:          options.UseBlueprint,
 		ModeConfigPath:        filepath.Join(workdir, ".agents", "modes.json"),
+		Mode:                  strings.TrimSpace(options.Mode),
+		ResumePrompt:          options.ResumePrompt,
 		DefaultTokens:         8000,
 		EscalatedTokens:       16000,
 		MaxRecoveryRetries:    3,
@@ -107,18 +115,18 @@ func newAgentConfig() (agentConfig, error) {
 		RetryBaseDelay:        500 * time.Millisecond,
 		RetryMaxDelay:         8 * time.Second,
 		BackgroundTimeout:     10 * time.Minute,
-		DisabledModules:       parseDisabledModules(os.Getenv("BEE_AGENT_DISABLED_MODULES")),
+		DisabledModules:       parseDisabledModules(options.DisabledModules),
 	}, nil
 }
 
-func blueprintPathFromEnv(workdir string) string {
-	if path := strings.TrimSpace(os.Getenv("BEE_AGENT_BLUEPRINT_PATH")); path != "" {
+func blueprintPathFromOptions(workdir string, options RunOptions) string {
+	if path := strings.TrimSpace(options.BlueprintPath); path != "" {
 		if filepath.IsAbs(path) {
 			return path
 		}
 		return filepath.Join(workdir, path)
 	}
-	id := strings.TrimSpace(os.Getenv("BEE_AGENT_BLUEPRINT_ID"))
+	id := strings.TrimSpace(options.BlueprintID)
 	if id == "" {
 		id = "default"
 	}
@@ -168,7 +176,7 @@ func newAgentRuntime(config agentConfig, events chan<- uiEvent, approvals <-chan
 	if _, err := nodeeditor.EnsureDefaultBlueprint(config.DefaultBlueprintPath); err != nil {
 		rt.emitLine("[blueprint] default blueprint: %v", err)
 	}
-	rt.modes = newModeRegistry(config.ModeConfigPath, os.Getenv("BEE_AGENT_MODE"), rt.emitLine)
+	rt.modes = newModeRegistry(config.ModeConfigPath, config.Mode, rt.emitLine)
 	rt.blueprint = rt.loadRuntimeBlueprint()
 	rt.sessions = newSessionStore(config.SessionDir)
 	rt.sessionID = rt.sessions.newID(time.Now())

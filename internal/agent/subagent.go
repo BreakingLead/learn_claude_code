@@ -4,12 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"strings"
 
 	"github.com/anthropics/anthropic-sdk-go"
-	"github.com/anthropics/anthropic-sdk-go/option"
-	"github.com/joho/godotenv"
 )
 
 type subagentModule struct {
@@ -82,12 +79,7 @@ func (rt *agentRuntime) spawnSubagent(raw json.RawMessage) string {
 		return fmt.Sprintf("Error: %v", err)
 	}
 
-	godotenv.Load()
-	opts := []option.RequestOption{}
-	if base := os.Getenv("ANTHROPIC_BASE_URL"); base != "" {
-		opts = append(opts, option.WithBaseURL(base))
-	}
-	client := anthropic.NewClient(opts...)
+	client := newAnthropicClient(rt.config)
 	ctx := context.Background()
 
 	rt.emitLine("%s ┌── %s spawned ──", colorDim(""), colorCyan("Subagent"))

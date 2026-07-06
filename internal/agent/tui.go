@@ -97,14 +97,9 @@ func newTUIStyles() tuiStyles {
 	}
 }
 
-func runTUI(ctx context.Context, client anthropic.Client) {
+func runTUI(ctx context.Context, client anthropic.Client, config agentConfig) {
 	events := make(chan uiEvent, 64)
 	approvals := make(chan bool)
-	config, err := newAgentConfig()
-	if err != nil {
-		fmt.Println(colorRed("Config error: " + err.Error()))
-		return
-	}
 	rt := newAgentRuntime(config, events, approvals)
 	rt.startCronScheduler()
 	history := chooseInitialSession(rt)
@@ -162,7 +157,7 @@ func chooseInitialSession(rt *agentRuntime) []anthropic.MessageParam {
 		return nil
 	}
 	records := rt.sessions.list()
-	if len(records) == 0 || sessionResumePromptDisabled() {
+	if len(records) == 0 || !rt.config.ResumePrompt {
 		_ = rt.sessions.saveSnapshot(rt.sessionID, nil)
 		fmt.Printf("New session: %s\n", rt.sessionID)
 		return nil
@@ -190,15 +185,6 @@ func chooseInitialSession(rt *agentRuntime) []anthropic.MessageParam {
 	}
 	fmt.Printf("Resumed session: %s (%d messages)\n", record.ID, record.MessageCount)
 	return messages
-}
-
-func sessionResumePromptDisabled() bool {
-	switch strings.ToLower(strings.TrimSpace(os.Getenv("BEE_AGENT_RESUME_PROMPT"))) {
-	case "0", "false", "no", "off", "skip":
-		return true
-	default:
-		return false
-	}
 }
 
 // Init 在 Bubble Tea 程序启动时调用；这里启动一个等待后台事件的命令。

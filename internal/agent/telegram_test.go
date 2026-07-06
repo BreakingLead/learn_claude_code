@@ -88,14 +88,15 @@ func TestTelegramHandleUpdateSkipsDisallowedChat(t *testing.T) {
 	}
 }
 
-func TestTelegramConfigFromEnv(t *testing.T) {
-	t.Setenv("BEE_AGENT_TELEGRAM", "true")
-	t.Setenv("TELEGRAM_BOT_TOKEN", "abc")
-	t.Setenv("TELEGRAM_BASE_URL", "https://example.test/")
-	t.Setenv("TELEGRAM_ALLOWED_CHATS", "1,2")
-	t.Setenv("TELEGRAM_POLL_INTERVAL", "5s")
-	config := newTelegramConfigFromEnv()
-	if !config.Enabled || config.Token != "abc" || config.BaseURL != "https://example.test" || config.PollInterval != 5*time.Second {
+func TestTelegramConfigFromOptions(t *testing.T) {
+	config := newTelegramConfigFromOptions(RunOptions{
+		TelegramToken:        "abc",
+		TelegramBaseURL:      "https://example.test/",
+		TelegramAllowedChats: "1,2",
+		TelegramPollInterval: 5 * time.Second,
+		TelegramTimeout:      45 * time.Second,
+	})
+	if config.Token != "abc" || config.BaseURL != "https://example.test" || config.PollInterval != 5*time.Second || config.Timeout != 45*time.Second {
 		t.Fatalf("unexpected config: %+v", config)
 	}
 	if !config.AllowedChats["1"] || !config.AllowedChats["2"] {

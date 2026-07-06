@@ -504,7 +504,7 @@ func (s *Store) RuntimeSelector(id string) BlueprintRuntimeSelector {
 	return BlueprintRuntimeSelector{
 		ID:      id,
 		Path:    path,
-		Command: "BEE_AGENT_USE_BLUEPRINT=1 BEE_AGENT_BLUEPRINT_ID=" + id + " go run ./cmd/bee-agent",
+		Command: "go run ./cmd/bee-agent --use-blueprint --blueprint-id " + id,
 	}
 }
 
