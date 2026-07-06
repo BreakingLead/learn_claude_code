@@ -21,7 +21,7 @@ func (rt *agentRuntime) agentLoop(ctx context.Context, client anthropic.Client, 
 // ── REPL 入口 ──────────────────────────────────────────
 
 func Run() {
-	godotenv.Load()
+	loadDotenvFiles()
 
 	ctx := context.Background()
 	if truthyEnv("BEE_AGENT_NODE_EDITOR") {
@@ -48,6 +48,14 @@ func Run() {
 	}
 
 	runTUI(ctx, client)
+}
+
+func loadDotenvFiles() {
+	paths := dotenvSearchPaths()
+	if len(paths) == 0 {
+		return
+	}
+	_ = godotenv.Load(paths...)
 }
 
 func newAnthropicClientFromEnv() anthropic.Client {

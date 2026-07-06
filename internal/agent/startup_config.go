@@ -3,6 +3,7 @@ package agent
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -58,7 +59,7 @@ func runStartupConfigIfNeeded() (startupConfigResult, error) {
 	values := result.values()
 	applyStartupConfig(values)
 	if result.saveEnv {
-		if err := writeDotenvValues(".env", values); err != nil {
+		if err := writeDotenvValues(dotenvWritePath(), values); err != nil {
 			return startupConfigResult{}, err
 		}
 	}
@@ -66,9 +67,35 @@ func runStartupConfigIfNeeded() (startupConfigResult, error) {
 }
 
 func startupConfigNeeded() bool {
-	return strings.TrimSpace(os.Getenv("ANTHROPIC_API_KEY")) == "" ||
-		strings.TrimSpace(os.Getenv("MODEL")) == "" ||
-		strings.TrimSpace(os.Getenv("FALLBACK_MODEL")) == ""
+	// MODEL/FALLBACK_MODEL 有运行时默认值；只有真正无法发请求的 API key 缺失时才打断启动。
+	return strings.TrimSpace(os.Getenv("ANTHROPIC_API_KEY")) == ""
+}
+
+func dotenvSearchPaths() []string {
+	wd, err := os.Getwd()
+	if err != nil {
+		return nil
+	}
+	paths := []string{}
+	for dir := wd; ; dir = filepath.Dir(dir) {
+		path := filepath.Join(dir, ".env")
+		if _, err := os.Stat(path); err == nil {
+			paths = append(paths, path)
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+	}
+	return paths
+}
+
+func dotenvWritePath() string {
+	paths := dotenvSearchPaths()
+	if len(paths) > 0 {
+		return paths[0]
+	}
+	return ".env"
 }
 
 type startupInput int

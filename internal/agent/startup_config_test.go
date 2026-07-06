@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-func TestStartupConfigNeededRequiresAPIKeyAndModels(t *testing.T) {
+func TestStartupConfigNeededRequiresAPIKeyOnly(t *testing.T) {
 	t.Setenv("ANTHROPIC_API_KEY", "")
 	t.Setenv("MODEL", "")
 	t.Setenv("FALLBACK_MODEL", "")
@@ -16,10 +16,35 @@ func TestStartupConfigNeededRequiresAPIKeyAndModels(t *testing.T) {
 	}
 
 	t.Setenv("ANTHROPIC_API_KEY", "key")
-	t.Setenv("MODEL", "model")
-	t.Setenv("FALLBACK_MODEL", "fallback")
+	t.Setenv("MODEL", "")
+	t.Setenv("FALLBACK_MODEL", "")
 	if startupConfigNeeded() {
-		t.Fatal("did not expect startup config when required env is present")
+		t.Fatal("did not expect startup config when API key is present")
+	}
+}
+
+func TestDotenvSearchPathsIncludesCurrentAndParents(t *testing.T) {
+	root := t.TempDir()
+	child := filepath.Join(root, "exp")
+	if err := os.MkdirAll(child, 0755); err != nil {
+		t.Fatal(err)
+	}
+	rootEnv := filepath.Join(root, ".env")
+	childEnv := filepath.Join(child, ".env")
+	if err := os.WriteFile(rootEnv, []byte("ANTHROPIC_API_KEY=root\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(childEnv, []byte("ANTHROPIC_BASE_URL=https://example.test\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Chdir(child)
+	paths := dotenvSearchPaths()
+	if len(paths) < 2 || paths[0] != childEnv || paths[1] != rootEnv {
+		t.Fatalf("unexpected dotenv search paths: %#v", paths)
+	}
+	if got := dotenvWritePath(); got != childEnv {
+		t.Fatalf("expected nearest .env write path %q, got %q", childEnv, got)
 	}
 }
 
