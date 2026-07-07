@@ -10,6 +10,7 @@ wheels/
 .venv
 
 # Runtime agent state
+.agents/
 .memory/
 .tasks/
 .agents/compact/
