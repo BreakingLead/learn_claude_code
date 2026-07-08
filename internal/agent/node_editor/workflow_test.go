@@ -90,6 +90,62 @@ func TestSimulateWorkflowShowsMessageHandoff(t *testing.T) {
 	}
 }
 
+func TestTimerWorkflowSimulatesScheduledPrompt(t *testing.T) {
+	workflow := timerWorkflow()
+	if err := ValidateWorkflow(workflow); err != nil {
+		t.Fatal(err)
+	}
+	steps, err := SimulateWorkflow(workflow, "manual input should not replace timer")
+	if err != nil {
+		t.Fatal(err)
+	}
+	timer := workflowSimulationStepByNodeID(steps, "timer")
+	if len(timer.Outputs) != 1 || timer.Outputs[0].Content != "Check CI status." {
+		t.Fatalf("unexpected timer simulation: %+v", timer)
+	}
+	agent := workflowSimulationStepByNodeID(steps, "agent")
+	if len(agent.Inputs) != 1 || agent.Inputs[0].FromNode != "timer" || agent.Inputs[0].Content != "Check CI status." {
+		t.Fatalf("expected agent to receive timer prompt: %+v", agent)
+	}
+}
+
+func TestSimulateWorkflowTemplateAndSwitch(t *testing.T) {
+	templateSteps, err := SimulateWorkflow(templateWorkflow(), "build the API")
+	if err != nil {
+		t.Fatal(err)
+	}
+	template := workflowSimulationStepByNodeID(templateSteps, "template")
+	if len(template.Outputs) != 1 || !strings.Contains(template.Outputs[0].Content, "Scheduled request:\nbuild the API") {
+		t.Fatalf("unexpected template output: %+v", template)
+	}
+
+	switchSteps, err := SimulateWorkflow(switchWorkflow(), "manual input")
+	if err != nil {
+		t.Fatal(err)
+	}
+	choice := workflowSimulationStepByNodeID(switchSteps, "switch")
+	if len(choice.Outputs) != 1 || choice.Outputs[0].Content != "Run the daytime prompt." {
+		t.Fatalf("unexpected switch output: %+v", choice)
+	}
+}
+
+func TestDefaultTimerWorkflowValidatesAndOrders(t *testing.T) {
+	workflow := DefaultTimerWorkflow()
+	if err := ValidateWorkflow(workflow); err != nil {
+		t.Fatal(err)
+	}
+	order, err := WorkflowExecutionOrder(workflow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(order, ",") != "timer,ci-agent,output" {
+		t.Fatalf("unexpected timer workflow order: %v", order)
+	}
+	if diagnostics := WorkflowDiagnostics(workflow); len(diagnostics) != 0 {
+		t.Fatalf("unexpected diagnostics: %+v", diagnostics)
+	}
+}
+
 func TestWorkflowDiagnosticsWarnAboutDisconnectedNodes(t *testing.T) {
 	if diagnostics := WorkflowDiagnostics(DefaultWorkflow()); len(diagnostics) != 0 {
 		t.Fatalf("expected default workflow without diagnostics, got %+v", diagnostics)
@@ -108,6 +164,162 @@ func TestWorkflowDiagnosticsWarnAboutDisconnectedNodes(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Fatalf("missing diagnostic %q in %+v", want, diagnostics)
 		}
+	}
+}
+
+func timerWorkflow() WorkflowDefinition {
+	return WorkflowDefinition{
+		Version: SchemaVersion,
+		ID:      "timer-workflow",
+		Name:    "Timer Workflow",
+		Nodes: []WorkflowNode{
+			{
+				ID:       "timer",
+				Type:     WorkflowNodeTypeTimer,
+				Label:    "Every Morning",
+				Position: Position{X: 80, Y: 180},
+				Outputs:  []Port{{ID: "message", Type: PortTypeMessage, Label: "Message", Direction: DirectionOutput}},
+				Config: map[string]any{
+					"cron":   "0 9 * * *",
+					"prompt": "Check CI status.",
+				},
+			},
+			{
+				ID:             "agent",
+				Type:           WorkflowNodeTypeAgent,
+				Label:          "CI Agent",
+				AgentBlueprint: "default",
+				Position:       Position{X: 340, Y: 180},
+				Inputs:         []Port{{ID: "input", Type: PortTypeMessage, Label: "Input", Direction: DirectionInput}},
+				Outputs:        []Port{{ID: "output", Type: PortTypeMessage, Label: "Output", Direction: DirectionOutput}},
+				Config: map[string]any{
+					"instruction": "Check the scheduled CI request.",
+				},
+			},
+			{
+				ID:       "output",
+				Type:     WorkflowNodeTypeOutput,
+				Label:    "Output",
+				Position: Position{X: 620, Y: 180},
+				Inputs:   []Port{{ID: "message", Type: PortTypeMessage, Label: "Message", Direction: DirectionInput}},
+			},
+		},
+		Edges: []Edge{
+			{ID: "edge-timer-agent", Source: Endpoint{Node: "timer", Port: "message"}, Target: Endpoint{Node: "agent", Port: "input"}},
+			{ID: "edge-agent-output", Source: Endpoint{Node: "agent", Port: "output"}, Target: Endpoint{Node: "output", Port: "message"}},
+		},
+	}
+}
+
+func templateWorkflow() WorkflowDefinition {
+	return WorkflowDefinition{
+		Version: SchemaVersion,
+		ID:      "template-workflow",
+		Name:    "Template Workflow",
+		Nodes: []WorkflowNode{
+			{
+				ID:       "prompt",
+				Type:     WorkflowNodeTypeInput,
+				Label:    "Prompt",
+				Position: Position{X: 80, Y: 180},
+				Outputs:  []Port{{ID: "message", Type: PortTypeMessage, Label: "Message", Direction: DirectionOutput}},
+			},
+			{
+				ID:       "template",
+				Type:     WorkflowNodeTypeTemplate,
+				Label:    "Template",
+				Position: Position{X: 300, Y: 180},
+				Inputs:   []Port{{ID: "input", Type: PortTypeMessage, Label: "Input", Direction: DirectionInput, Multiple: true}},
+				Outputs:  []Port{{ID: "message", Type: PortTypeMessage, Label: "Message", Direction: DirectionOutput}},
+				Config: map[string]any{
+					"template": "Scheduled request:\n{{input}}",
+				},
+			},
+			{
+				ID:             "agent",
+				Type:           WorkflowNodeTypeAgent,
+				Label:          "Agent",
+				AgentBlueprint: "default",
+				Position:       Position{X: 520, Y: 180},
+				Inputs:         []Port{{ID: "input", Type: PortTypeMessage, Label: "Input", Direction: DirectionInput}},
+				Outputs:        []Port{{ID: "output", Type: PortTypeMessage, Label: "Output", Direction: DirectionOutput}},
+				Config: map[string]any{
+					"instruction": "Handle the templated input.",
+				},
+			},
+			{
+				ID:       "output",
+				Type:     WorkflowNodeTypeOutput,
+				Label:    "Output",
+				Position: Position{X: 760, Y: 180},
+				Inputs:   []Port{{ID: "message", Type: PortTypeMessage, Label: "Message", Direction: DirectionInput}},
+			},
+		},
+		Edges: []Edge{
+			{ID: "edge-prompt-template", Source: Endpoint{Node: "prompt", Port: "message"}, Target: Endpoint{Node: "template", Port: "input"}},
+			{ID: "edge-template-agent", Source: Endpoint{Node: "template", Port: "message"}, Target: Endpoint{Node: "agent", Port: "input"}},
+			{ID: "edge-agent-output", Source: Endpoint{Node: "agent", Port: "output"}, Target: Endpoint{Node: "output", Port: "message"}},
+		},
+	}
+}
+
+func switchWorkflow() WorkflowDefinition {
+	return WorkflowDefinition{
+		Version: SchemaVersion,
+		ID:      "switch-workflow",
+		Name:    "Switch Workflow",
+		Nodes: []WorkflowNode{
+			{
+				ID:       "condition",
+				Type:     WorkflowNodeTypeTimer,
+				Label:    "Condition",
+				Position: Position{X: 80, Y: 80},
+				Outputs:  []Port{{ID: "message", Type: PortTypeMessage, Label: "Message", Direction: DirectionOutput}},
+				Config:   map[string]any{"cron": "0 9 * * *", "prompt": "daytime"},
+			},
+			{
+				ID:       "true-message",
+				Type:     WorkflowNodeTypeTimer,
+				Label:    "True Message",
+				Position: Position{X: 80, Y: 180},
+				Outputs:  []Port{{ID: "message", Type: PortTypeMessage, Label: "Message", Direction: DirectionOutput}},
+				Config:   map[string]any{"cron": "0 9 * * *", "prompt": "Run the daytime prompt."},
+			},
+			{
+				ID:       "false-message",
+				Type:     WorkflowNodeTypeTimer,
+				Label:    "False Message",
+				Position: Position{X: 80, Y: 280},
+				Outputs:  []Port{{ID: "message", Type: PortTypeMessage, Label: "Message", Direction: DirectionOutput}},
+				Config:   map[string]any{"cron": "0 9 * * *", "prompt": "Run the after-hours prompt."},
+			},
+			{
+				ID:       "switch",
+				Type:     WorkflowNodeTypeSwitch,
+				Label:    "Switch",
+				Position: Position{X: 340, Y: 180},
+				Inputs: []Port{
+					{ID: "condition", Type: PortTypeMessage, Label: "Condition", Direction: DirectionInput},
+					{ID: "true", Type: PortTypeMessage, Label: "True", Direction: DirectionInput},
+					{ID: "false", Type: PortTypeMessage, Label: "False", Direction: DirectionInput},
+				},
+				Outputs: []Port{{ID: "message", Type: PortTypeMessage, Label: "Message", Direction: DirectionOutput}},
+				Config:  map[string]any{"match": "daytime"},
+			},
+			{
+				ID:       "output",
+				Type:     WorkflowNodeTypeOutput,
+				Label:    "Output",
+				Position: Position{X: 600, Y: 180},
+				Inputs:   []Port{{ID: "message", Type: PortTypeMessage, Label: "Message", Direction: DirectionInput}},
+			},
+		},
+		Edges: []Edge{
+			{ID: "edge-condition-switch", Source: Endpoint{Node: "condition", Port: "message"}, Target: Endpoint{Node: "switch", Port: "condition"}},
+			{ID: "edge-true-switch", Source: Endpoint{Node: "true-message", Port: "message"}, Target: Endpoint{Node: "switch", Port: "true"}},
+			{ID: "edge-false-switch", Source: Endpoint{Node: "false-message", Port: "message"}, Target: Endpoint{Node: "switch", Port: "false"}},
+			{ID: "edge-switch-output", Source: Endpoint{Node: "switch", Port: "message"}, Target: Endpoint{Node: "output", Port: "message"}},
+		},
 	}
 }
 
@@ -148,8 +360,34 @@ func TestEnsureDefaultWorkflowWritesOnce(t *testing.T) {
 	}
 }
 
+func TestEnsureDefaultTimerWorkflowWritesOnce(t *testing.T) {
+	path := filepath.Join(t.TempDir(), ".agents", "blueprints", "workflows", "timer-ci-check.json")
+	created, err := EnsureDefaultTimerWorkflow(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !created {
+		t.Fatal("expected default timer workflow to be created")
+	}
+	workflow, err := ReadWorkflow(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if workflow.ID != "timer-ci-check" {
+		t.Fatalf("unexpected workflow: %+v", workflow)
+	}
+
+	created, err = EnsureDefaultTimerWorkflow(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created {
+		t.Fatal("expected existing timer workflow to be preserved")
+	}
+}
+
 func TestExampleWorkflowsValidateAndOrder(t *testing.T) {
-	paths, err := filepath.Glob(filepath.Join("..", "..", "..", ".agents", "blueprints", "workflows", "*.json"))
+	paths, err := filepath.Glob(filepath.Join("..", "..", "..", "docs", "examples", "workflows", "*.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -168,6 +406,9 @@ func TestExampleWorkflowsValidateAndOrder(t *testing.T) {
 			}
 			if len(order) != len(workflow.Nodes) {
 				t.Fatalf("unexpected order for %s: %+v", path, order)
+			}
+			if diagnostics := WorkflowDiagnostics(workflow); len(diagnostics) != 0 {
+				t.Fatalf("unexpected diagnostics for %s: %+v", path, diagnostics)
 			}
 		})
 	}

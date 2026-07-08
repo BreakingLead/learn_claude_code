@@ -80,12 +80,18 @@ func runNodeEditor(options RunOptions) {
 		fmt.Println(colorRed("Workflow error: " + err.Error()))
 		return
 	}
+	if _, err := nodeeditor.EnsureDefaultTimerWorkflow(nodeeditor.DefaultTimerWorkflowPath(config.Workdir)); err != nil {
+		fmt.Println(colorRed("Timer workflow error: " + err.Error()))
+		return
+	}
 	addr := options.NodeEditorAddr
 	if addr == "" {
 		addr = "127.0.0.1:8787"
 	}
 	fmt.Printf("Bee Agent Builder: http://%s\n", addr)
-	if err := http.ListenAndServe(addr, nodeeditor.NewServer(config.Workdir).Handler()); err != nil {
+	client := newAnthropicClient(config)
+	server := nodeeditor.NewServerWithPlanExecutorFactory(config.Workdir, newBeeAgentPlanExecutorFactory(config, client))
+	if err := http.ListenAndServe(addr, server.Handler()); err != nil {
 		fmt.Println(colorRed("Node editor error: " + err.Error()))
 	}
 }

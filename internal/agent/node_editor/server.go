@@ -25,7 +25,8 @@ type Server struct {
 }
 
 type Store struct {
-	root string
+	root                string
+	planExecutorFactory PlanExecutorFactory
 }
 
 type BlueprintSummary struct {
@@ -166,13 +167,33 @@ type WorkflowRunSaveResponse struct {
 }
 
 type WorkflowCompiledPlan struct {
-	WorkflowID  string                   `json:"workflow_id"`
-	Name        string                   `json:"name"`
-	SourceHash  string                   `json:"source_hash"`
-	Order       []string                 `json:"order"`
-	AgentRuns   []WorkflowCompiledRun    `json:"agent_runs"`
-	Diagnostics []string                 `json:"diagnostics,omitempty"`
-	Outputs     []WorkflowCompiledOutput `json:"outputs,omitempty"`
+	WorkflowID  string                      `json:"workflow_id"`
+	Name        string                      `json:"name"`
+	SourceHash  string                      `json:"source_hash"`
+	Order       []string                    `json:"order"`
+	Triggers    []WorkflowCompiledTrigger   `json:"triggers,omitempty"`
+	Transforms  []WorkflowCompiledTransform `json:"transform_runs,omitempty"`
+	AgentRuns   []WorkflowCompiledRun       `json:"agent_runs"`
+	Diagnostics []string                    `json:"diagnostics,omitempty"`
+	Outputs     []WorkflowCompiledOutput    `json:"outputs,omitempty"`
+}
+
+type WorkflowCompiledTrigger struct {
+	NodeID  string `json:"node_id"`
+	Label   string `json:"label"`
+	Type    string `json:"type"`
+	Port    string `json:"port"`
+	Cron    string `json:"cron,omitempty"`
+	Content string `json:"content"`
+}
+
+type WorkflowCompiledTransform struct {
+	NodeID  string                      `json:"node_id"`
+	Label   string                      `json:"label"`
+	Type    string                      `json:"type"`
+	Inputs  []WorkflowCompiledInput     `json:"inputs,omitempty"`
+	Outputs []WorkflowCompiledRunOutput `json:"outputs,omitempty"`
+	Config  map[string]any              `json:"config,omitempty"`
 }
 
 type WorkflowCompiledRun struct {
@@ -216,7 +237,18 @@ type WorkflowAgentResolution struct {
 }
 
 func NewStore(workdir string) *Store {
-	return &Store{root: filepath.Join(workdir, ".agents", "blueprints")}
+	return &Store{
+		root:                filepath.Join(workdir, ".agents", "blueprints"),
+		planExecutorFactory: NewPlanExecutor,
+	}
+}
+
+func (s *Store) SetPlanExecutorFactory(factory PlanExecutorFactory) {
+	if factory == nil {
+		s.planExecutorFactory = NewPlanExecutor
+		return
+	}
+	s.planExecutorFactory = factory
 }
 
 func (s *Store) AgentDir() string {
@@ -677,6 +709,20 @@ func (s *Store) WriteComposite(id string, definition CompositeDefinition) error 
 	return WriteComposite(path, definition)
 }
 
+func (s *Store) DeleteComposite(id string) error {
+	path, err := s.CompositePath(id)
+	if err != nil {
+		return err
+	}
+	if err := os.Remove(path); err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("composite %q not found", id)
+		}
+		return err
+	}
+	return nil
+}
+
 func (s *Store) ReadWorkflow(id string) (WorkflowDefinition, error) {
 	path, err := s.WorkflowPath(id)
 	if err != nil {
@@ -896,6 +942,29 @@ func (s *Store) CompileWorkflow(workflow WorkflowDefinition) (WorkflowCompiledPl
 	for _, nodeID := range order {
 		node := nodes[nodeID]
 		switch node.Type {
+		case WorkflowNodeTypeInput, WorkflowNodeTypeTimer:
+			for _, port := range node.Outputs {
+				if port.Direction != DirectionOutput || port.Type != PortTypeMessage {
+					continue
+				}
+				plan.Triggers = append(plan.Triggers, WorkflowCompiledTrigger{
+					NodeID:  node.ID,
+					Label:   node.Label,
+					Type:    node.Type,
+					Port:    port.ID,
+					Cron:    workflowTimerCron(node),
+					Content: workflowTriggerContent(node),
+				})
+			}
+		case WorkflowNodeTypeTemplate, WorkflowNodeTypeSwitch:
+			plan.Transforms = append(plan.Transforms, WorkflowCompiledTransform{
+				NodeID:  node.ID,
+				Label:   node.Label,
+				Type:    node.Type,
+				Inputs:  compileWorkflowInputs(incoming[node.ID]),
+				Outputs: compileWorkflowRunOutputs(node.Outputs, outgoing[node.ID]),
+				Config:  copyWorkflowConfig(node.Config),
+			})
 		case WorkflowNodeTypeAgent:
 			resolution := resolutions[node.ID]
 			plan.AgentRuns = append(plan.AgentRuns, WorkflowCompiledRun{
@@ -1029,6 +1098,12 @@ func NewServer(workdir string) *Server {
 	return &Server{store: NewStore(workdir)}
 }
 
+func NewServerWithPlanExecutorFactory(workdir string, factory PlanExecutorFactory) *Server {
+	store := NewStore(workdir)
+	store.SetPlanExecutorFactory(factory)
+	return &Server{store: store}
+}
+
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/node-templates", s.handleNodeTemplates)
@@ -1041,6 +1116,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/composites", s.handleListComposites)
 	mux.HandleFunc("GET /api/composites/{id}", s.handleGetComposite)
 	mux.HandleFunc("PUT /api/composites/{id}", s.handlePutComposite)
+	mux.HandleFunc("DELETE /api/composites/{id}", s.handleDeleteComposite)
 	mux.HandleFunc("POST /api/composites/from-selection", s.handleCompositeFromSelection)
 	mux.HandleFunc("GET /api/workflows", s.handleListWorkflows)
 	mux.HandleFunc("POST /api/workflows", s.handleCreateWorkflow)
@@ -1173,6 +1249,14 @@ func (s *Server) handlePutComposite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.store.WriteComposite(r.PathValue("id"), definition); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func (s *Server) handleDeleteComposite(w http.ResponseWriter, r *http.Request) {
+	if err := s.store.DeleteComposite(r.PathValue("id")); err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
@@ -1574,6 +1658,17 @@ func compileWorkflowRunOutputs(ports []Port, edges []Edge) []WorkflowCompiledRun
 		})
 	}
 	return outputs
+}
+
+func copyWorkflowConfig(config map[string]any) map[string]any {
+	if len(config) == 0 {
+		return nil
+	}
+	copied := make(map[string]any, len(config))
+	for key, value := range config {
+		copied[key] = value
+	}
+	return copied
 }
 
 func workflowSourceHash(workflow WorkflowDefinition) (string, error) {

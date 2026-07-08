@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
+	"sort"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -14,6 +16,10 @@ const (
 	DefaultWorkflowRunTimeoutMS = 30000
 	WorkflowRunStatusCompleted  = "completed"
 	WorkflowRunStatusFailed     = "failed"
+
+	WorkflowExecutionModeDryRun          = "dry_run"
+	WorkflowExecutionModeExternalCommand = "external_command"
+	WorkflowExecutionModeBeeAgent        = "bee_agent"
 )
 
 type WorkflowPlanRunRequest struct {
@@ -87,6 +93,8 @@ type PlanExecutor struct {
 	TimeoutMS int
 }
 
+type PlanExecutorFactory func(WorkflowPlanRunRequest) (PlanExecutor, string, error)
+
 type AgentInvoker interface {
 	InvokeAgent(context.Context, AgentInvocation) (AgentInvocationResult, error)
 }
@@ -118,7 +126,7 @@ func NewDryRunPlanExecutor() PlanExecutor {
 func NewPlanExecutor(request WorkflowPlanRunRequest) (PlanExecutor, string, error) {
 	mode := strings.TrimSpace(request.ExecutionMode)
 	if mode == "" {
-		mode = "dry_run"
+		mode = WorkflowExecutionModeDryRun
 	}
 	timeoutMS := request.TimeoutMS
 	if timeoutMS <= 0 {
@@ -126,9 +134,9 @@ func NewPlanExecutor(request WorkflowPlanRunRequest) (PlanExecutor, string, erro
 	}
 	timeout := time.Duration(timeoutMS) * time.Millisecond
 	switch mode {
-	case "dry_run":
+	case WorkflowExecutionModeDryRun:
 		return PlanExecutor{Invoker: DryRunAgentInvoker{}, Timeout: timeout, TimeoutMS: timeoutMS}, mode, nil
-	case "external_command":
+	case WorkflowExecutionModeExternalCommand:
 		if len(request.ExternalCommand) == 0 || strings.TrimSpace(request.ExternalCommand[0]) == "" {
 			return PlanExecutor{}, "", fmt.Errorf("external_command execution requires external_command")
 		}
@@ -142,18 +150,30 @@ func NewPlanExecutor(request WorkflowPlanRunRequest) (PlanExecutor, string, erro
 	}
 }
 
+func WorkflowRunTimeout(request WorkflowPlanRunRequest) (time.Duration, int) {
+	timeoutMS := request.TimeoutMS
+	if timeoutMS <= 0 {
+		timeoutMS = DefaultWorkflowRunTimeoutMS
+	}
+	return time.Duration(timeoutMS) * time.Millisecond, timeoutMS
+}
+
 func (s *Store) RunWorkflowPlan(ctx context.Context, id string, request WorkflowPlanRunRequest) (WorkflowPlanRun, error) {
 	plan, err := s.ReadWorkflowPlan(id)
 	if err != nil {
 		return WorkflowPlanRun{}, err
 	}
-	executor, mode, err := NewPlanExecutor(request)
+	executorFactory := s.planExecutorFactory
+	if executorFactory == nil {
+		executorFactory = NewPlanExecutor
+	}
+	executor, mode, err := executorFactory(request)
 	if err != nil {
 		return WorkflowPlanRun{}, err
 	}
 	run, err := executor.Execute(ctx, plan, request.Input)
 	run.ExecutionMode = mode
-	if mode == "external_command" {
+	if mode == WorkflowExecutionModeExternalCommand {
 		run.ExternalCommand = append([]string(nil), request.ExternalCommand...)
 	}
 	currentHash, stale := s.currentWorkflowHash(plan.WorkflowID, plan.SourceHash)
@@ -200,8 +220,10 @@ func (e PlanExecutor) Execute(ctx context.Context, plan WorkflowCompiledPlan, in
 		input = "Sample workflow input"
 	}
 	runStart := time.Now()
-	messages := map[string]string{}
+	messages := workflowInitialMessages(plan)
 	producedMessages := workflowProducedMessageEndpoints(plan)
+	executables := workflowExecutableNodes(plan)
+	producerNodeIDs := workflowProducerNodeIDs(executables)
 	planSnapshot := plan
 	run := WorkflowPlanRun{
 		WorkflowID:   plan.WorkflowID,
@@ -215,39 +237,76 @@ func (e PlanExecutor) Execute(ctx context.Context, plan WorkflowCompiledPlan, in
 		Diagnostics:  append([]string(nil), plan.Diagnostics...),
 	}
 
-	for _, agentRun := range plan.AgentRuns {
-		if err := ctx.Err(); err != nil {
+	execCtx, cancelExecution := context.WithCancel(ctx)
+	defer cancelExecution()
+	started := map[string]bool{}
+	completed := map[string]bool{}
+	stepResults := make([]WorkflowPlanRunStep, len(plan.AgentRuns))
+	remaining := len(executables)
+	for remaining > 0 {
+		if err := execCtx.Err(); err != nil {
 			return failWorkflowPlanRun(run, err), err
 		}
-		stepStart := time.Now()
-		stepInputs, err := workflowPlanRunInputs(agentRun.Inputs, messages, input, producedMessages)
-		if err != nil {
-			err = fmt.Errorf("prepare agent %q inputs: %w", agentRun.NodeID, err)
-			stepFinish := time.Now()
-			step := newWorkflowPlanRunStep(agentRun, stepInputs, stepStart, stepFinish)
-			run.Steps = append(run.Steps, failWorkflowPlanRunStep(step, err))
-			return failWorkflowPlanRun(run, err), err
-		}
-		result, err := invoker.InvokeAgent(ctx, AgentInvocation{Run: agentRun, Inputs: stepInputs})
-		stepFinish := time.Now()
-		step := newWorkflowPlanRunStep(agentRun, stepInputs, stepStart, stepFinish)
-		if err != nil {
-			err = fmt.Errorf("invoke agent %q: %w", agentRun.NodeID, err)
-			run.Steps = append(run.Steps, failWorkflowPlanRunStep(step, err))
-			return failWorkflowPlanRun(run, err), err
-		}
-		run.Diagnostics = append(run.Diagnostics, result.Diagnostics...)
-		for _, output := range agentRun.Outputs {
-			stepOutput := WorkflowPlanRunStepOutput{
-				Port:    output.Port,
-				Content: result.Content,
-				To:      append([]Endpoint(nil), output.To...),
+		var ready []workflowExecutableNode
+		for _, executable := range executables {
+			if started[executable.NodeID] || !workflowExecutableDependenciesCompleted(executable, producerNodeIDs, completed) {
+				continue
 			}
-			step.Outputs = append(step.Outputs, stepOutput)
-			messages[endpointKey(Endpoint{Node: agentRun.NodeID, Port: output.Port})] = result.Content
+			started[executable.NodeID] = true
+			ready = append(ready, executable)
 		}
-		run.Steps = append(run.Steps, step)
+		if len(ready) == 0 {
+			err := workflowExecutionDeadlockError(executables, started, completed, producerNodeIDs)
+			return failWorkflowPlanRun(run, err), err
+		}
+
+		results := make(chan workflowExecutableRunResult, len(ready))
+		var wg sync.WaitGroup
+		for _, readyRun := range ready {
+			wg.Add(1)
+			go func(readyRun workflowExecutableNode) {
+				defer wg.Done()
+				results <- executeWorkflowNode(execCtx, invoker, readyRun, messages, input, producedMessages)
+			}(readyRun)
+		}
+		go func() {
+			wg.Wait()
+			close(results)
+		}()
+
+		var batchResults []workflowExecutableRunResult
+		var firstFailure *workflowExecutableRunResult
+		for result := range results {
+			batchResults = append(batchResults, result)
+			if result.Err != nil {
+				cancelExecution()
+			}
+			if result.Err != nil && (firstFailure == nil || result.Order < firstFailure.Order) {
+				copyResult := result
+				firstFailure = &copyResult
+			}
+		}
+		if firstFailure != nil {
+			cancelExecution()
+			if firstFailure.AgentIndex >= 0 {
+				stepResults[firstFailure.AgentIndex] = firstFailure.Step
+			}
+			run.Steps = appendCompletedWorkflowSteps(stepResults)
+			return failWorkflowPlanRun(run, firstFailure.Err), firstFailure.Err
+		}
+		for _, result := range batchResults {
+			if result.AgentIndex >= 0 {
+				stepResults[result.AgentIndex] = result.Step
+			}
+			completed[result.NodeID] = true
+			run.Diagnostics = append(run.Diagnostics, result.Diagnostics...)
+			for key, content := range result.Messages {
+				messages[key] = content
+			}
+			remaining--
+		}
 	}
+	run.Steps = appendCompletedWorkflowSteps(stepResults)
 
 	for _, output := range plan.Outputs {
 		inputs, err := workflowPlanRunInputs(output.Inputs, messages, input, producedMessages)
@@ -264,6 +323,139 @@ func (e PlanExecutor) Execute(ctx context.Context, plan WorkflowCompiledPlan, in
 	}
 	finishWorkflowPlanRun(&run, runStart, time.Now())
 	return run, nil
+}
+
+type workflowExecutableKind string
+
+const (
+	workflowExecutableAgent     workflowExecutableKind = "agent"
+	workflowExecutableTransform workflowExecutableKind = "transform"
+)
+
+type workflowExecutableNode struct {
+	Order      int
+	Kind       workflowExecutableKind
+	NodeID     string
+	AgentIndex int
+	Agent      WorkflowCompiledRun
+	Transform  WorkflowCompiledTransform
+}
+
+type workflowExecutableRunResult struct {
+	Order       int
+	NodeID      string
+	AgentIndex  int
+	Step        WorkflowPlanRunStep
+	Messages    map[string]string
+	Diagnostics []string
+	Err         error
+}
+
+func executeWorkflowNode(ctx context.Context, invoker AgentInvoker, readyRun workflowExecutableNode, messages map[string]string, input string, producedMessages map[string]bool) workflowExecutableRunResult {
+	if readyRun.Kind == workflowExecutableTransform {
+		return executeWorkflowTransform(readyRun, messages, input, producedMessages)
+	}
+	return executeWorkflowAgent(ctx, invoker, readyRun, messages, input, producedMessages)
+}
+
+func executeWorkflowAgent(ctx context.Context, invoker AgentInvoker, readyRun workflowExecutableNode, messages map[string]string, input string, producedMessages map[string]bool) workflowExecutableRunResult {
+	agentRun := readyRun.Agent
+	stepStart := time.Now()
+	stepInputs, err := workflowPlanRunInputs(agentRun.Inputs, messages, input, producedMessages)
+	if err != nil {
+		err = fmt.Errorf("prepare agent %q inputs: %w", agentRun.NodeID, err)
+		stepFinish := time.Now()
+		step := newWorkflowPlanRunStep(agentRun, stepInputs, stepStart, stepFinish)
+		return workflowExecutableRunResult{Order: readyRun.Order, NodeID: readyRun.NodeID, AgentIndex: readyRun.AgentIndex, Step: failWorkflowPlanRunStep(step, err), Err: err}
+	}
+	result, err := invoker.InvokeAgent(ctx, AgentInvocation{Run: agentRun, Inputs: stepInputs})
+	stepFinish := time.Now()
+	step := newWorkflowPlanRunStep(agentRun, stepInputs, stepStart, stepFinish)
+	if err != nil {
+		err = fmt.Errorf("invoke agent %q: %w", agentRun.NodeID, err)
+		return workflowExecutableRunResult{Order: readyRun.Order, NodeID: readyRun.NodeID, AgentIndex: readyRun.AgentIndex, Step: failWorkflowPlanRunStep(step, err), Err: err}
+	}
+	messagesOut := map[string]string{}
+	for _, output := range agentRun.Outputs {
+		stepOutput := WorkflowPlanRunStepOutput{
+			Port:    output.Port,
+			Content: result.Content,
+			To:      append([]Endpoint(nil), output.To...),
+		}
+		step.Outputs = append(step.Outputs, stepOutput)
+		messagesOut[endpointKey(Endpoint{Node: agentRun.NodeID, Port: output.Port})] = result.Content
+	}
+	return workflowExecutableRunResult{
+		Order:       readyRun.Order,
+		NodeID:      readyRun.NodeID,
+		AgentIndex:  readyRun.AgentIndex,
+		Step:        step,
+		Messages:    messagesOut,
+		Diagnostics: result.Diagnostics,
+	}
+}
+
+func executeWorkflowTransform(readyRun workflowExecutableNode, messages map[string]string, input string, producedMessages map[string]bool) workflowExecutableRunResult {
+	transform := readyRun.Transform
+	inputs, err := workflowPlanRunInputs(transform.Inputs, messages, input, producedMessages)
+	if err != nil {
+		err = fmt.Errorf("prepare transform %q inputs: %w", transform.NodeID, err)
+		return workflowExecutableRunResult{Order: readyRun.Order, NodeID: readyRun.NodeID, AgentIndex: -1, Err: err}
+	}
+	content := workflowTransformContent(transform, inputs)
+	messagesOut := map[string]string{}
+	for _, output := range transform.Outputs {
+		messagesOut[endpointKey(Endpoint{Node: transform.NodeID, Port: output.Port})] = content
+	}
+	return workflowExecutableRunResult{
+		Order:      readyRun.Order,
+		NodeID:     readyRun.NodeID,
+		AgentIndex: -1,
+		Messages:   messagesOut,
+	}
+}
+
+func workflowExecutableDependenciesCompleted(executable workflowExecutableNode, producerNodeIDs map[string]bool, completed map[string]bool) bool {
+	for _, input := range workflowExecutableInputs(executable) {
+		if producerNodeIDs[input.FromNode] && !completed[input.FromNode] {
+			return false
+		}
+	}
+	return true
+}
+
+func workflowExecutionDeadlockError(executables []workflowExecutableNode, started map[string]bool, completed map[string]bool, producerNodeIDs map[string]bool) error {
+	var blocked []string
+	for _, executable := range executables {
+		if started[executable.NodeID] {
+			continue
+		}
+		var waiting []string
+		for _, input := range workflowExecutableInputs(executable) {
+			if producerNodeIDs[input.FromNode] && !completed[input.FromNode] {
+				waiting = append(waiting, input.FromNode+"."+input.FromPort)
+			}
+		}
+		if len(waiting) == 0 {
+			blocked = append(blocked, executable.NodeID)
+			continue
+		}
+		blocked = append(blocked, fmt.Sprintf("%s waits for %s", executable.NodeID, strings.Join(waiting, ", ")))
+	}
+	if len(blocked) == 0 {
+		return fmt.Errorf("workflow execution deadlock")
+	}
+	return fmt.Errorf("workflow execution deadlock: %s", strings.Join(blocked, "; "))
+}
+
+func appendCompletedWorkflowSteps(steps []WorkflowPlanRunStep) []WorkflowPlanRunStep {
+	result := make([]WorkflowPlanRunStep, 0, len(steps))
+	for _, step := range steps {
+		if step.NodeID != "" {
+			result = append(result, step)
+		}
+	}
+	return result
 }
 
 func newWorkflowPlanRunStep(agentRun WorkflowCompiledRun, inputs []WorkflowPlanRunInput, started time.Time, finished time.Time) WorkflowPlanRunStep {
@@ -382,7 +574,6 @@ func workflowPlanRunInputs(inputs []WorkflowCompiledInput, messages map[string]s
 				return runInputs, fmt.Errorf("missing upstream message %s.%s", input.FromNode, input.FromPort)
 			}
 			content = fallback
-			messages[key] = content
 		}
 		runInputs = append(runInputs, WorkflowPlanRunInput{
 			FromNode:   input.FromNode,
@@ -401,7 +592,125 @@ func workflowProducedMessageEndpoints(plan WorkflowCompiledPlan) map[string]bool
 			produced[endpointKey(Endpoint{Node: run.NodeID, Port: output.Port})] = true
 		}
 	}
+	for _, transform := range plan.Transforms {
+		for _, output := range transform.Outputs {
+			produced[endpointKey(Endpoint{Node: transform.NodeID, Port: output.Port})] = true
+		}
+	}
 	return produced
+}
+
+func workflowExecutableNodes(plan WorkflowCompiledPlan) []workflowExecutableNode {
+	agents := map[string]workflowExecutableNode{}
+	for index, run := range plan.AgentRuns {
+		agents[run.NodeID] = workflowExecutableNode{
+			Kind:       workflowExecutableAgent,
+			NodeID:     run.NodeID,
+			AgentIndex: index,
+			Agent:      run,
+		}
+	}
+	transforms := map[string]workflowExecutableNode{}
+	for _, transform := range plan.Transforms {
+		transforms[transform.NodeID] = workflowExecutableNode{
+			Kind:       workflowExecutableTransform,
+			NodeID:     transform.NodeID,
+			AgentIndex: -1,
+			Transform:  transform,
+		}
+	}
+	var executables []workflowExecutableNode
+	if len(plan.Order) == 0 {
+		for _, executable := range transforms {
+			executable.Order = len(executables)
+			executables = append(executables, executable)
+		}
+		sort.SliceStable(executables, func(i, j int) bool {
+			return executables[i].NodeID < executables[j].NodeID
+		})
+		for index := range executables {
+			executables[index].Order = index
+		}
+		for _, run := range plan.AgentRuns {
+			executable := agents[run.NodeID]
+			executable.Order = len(executables)
+			executables = append(executables, executable)
+		}
+		return executables
+	}
+	for _, nodeID := range plan.Order {
+		if executable, ok := transforms[nodeID]; ok {
+			executable.Order = len(executables)
+			executables = append(executables, executable)
+			continue
+		}
+		if executable, ok := agents[nodeID]; ok {
+			executable.Order = len(executables)
+			executables = append(executables, executable)
+		}
+	}
+	return executables
+}
+
+func workflowProducerNodeIDs(executables []workflowExecutableNode) map[string]bool {
+	ids := map[string]bool{}
+	for _, executable := range executables {
+		ids[executable.NodeID] = true
+	}
+	return ids
+}
+
+func workflowExecutableInputs(executable workflowExecutableNode) []WorkflowCompiledInput {
+	if executable.Kind == workflowExecutableTransform {
+		return executable.Transform.Inputs
+	}
+	return executable.Agent.Inputs
+}
+
+func workflowInitialMessages(plan WorkflowCompiledPlan) map[string]string {
+	messages := map[string]string{}
+	for _, trigger := range plan.Triggers {
+		if trigger.Type != WorkflowNodeTypeTimer || strings.TrimSpace(trigger.Content) == "" {
+			continue
+		}
+		messages[endpointKey(Endpoint{Node: trigger.NodeID, Port: trigger.Port})] = trigger.Content
+	}
+	return messages
+}
+
+func workflowTransformContent(transform WorkflowCompiledTransform, inputs []WorkflowPlanRunInput) string {
+	simulationInputs := workflowSimulationInputsFromRun(inputs)
+	switch transform.Type {
+	case WorkflowNodeTypeTemplate:
+		template := stringNodeConfig(transform.Config, "template")
+		if strings.TrimSpace(template) == "" {
+			template = "{{inputs}}"
+		}
+		return renderWorkflowTemplate(template, simulationInputs)
+	case WorkflowNodeTypeSwitch:
+		return workflowSwitchContent(WorkflowNode{Type: WorkflowNodeTypeSwitch, Config: transform.Config}, simulationInputs)
+	default:
+		var parts []string
+		for _, input := range inputs {
+			if strings.TrimSpace(input.Content) != "" {
+				parts = append(parts, input.Content)
+			}
+		}
+		return strings.Join(parts, "\n\n")
+	}
+}
+
+func workflowSimulationInputsFromRun(inputs []WorkflowPlanRunInput) []WorkflowSimulationInput {
+	result := make([]WorkflowSimulationInput, 0, len(inputs))
+	for _, input := range inputs {
+		result = append(result, WorkflowSimulationInput{
+			FromNode:   input.FromNode,
+			FromPort:   input.FromPort,
+			TargetPort: input.TargetPort,
+			Content:    input.Content,
+		})
+	}
+	return result
 }
 
 func workflowPlanDryRunContent(run WorkflowCompiledRun, inputs []WorkflowPlanRunInput) string {

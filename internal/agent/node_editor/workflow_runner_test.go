@@ -6,19 +6,25 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
 
 type recordingInvoker struct {
-	calls []string
+	mu          sync.Mutex
+	calls       []string
+	invocations []AgentInvocation
 }
 
 func (i *recordingInvoker) InvokeAgent(ctx context.Context, invocation AgentInvocation) (AgentInvocationResult, error) {
 	if err := ctx.Err(); err != nil {
 		return AgentInvocationResult{}, err
 	}
+	i.mu.Lock()
+	defer i.mu.Unlock()
 	i.calls = append(i.calls, invocation.Run.NodeID)
+	i.invocations = append(i.invocations, invocation)
 	return AgentInvocationResult{
 		Content: fmt.Sprintf("agent=%s inputs=%d", invocation.Run.NodeID, len(invocation.Inputs)),
 	}, nil
@@ -87,7 +93,84 @@ func TestRunCompiledWorkflowPlanPropagatesMessages(t *testing.T) {
 	}
 }
 
-func TestPlanExecutorRejectsMissingUpstreamAgentOutput(t *testing.T) {
+func TestRunCompiledWorkflowPlanUsesTimerTriggerContent(t *testing.T) {
+	workdir := t.TempDir()
+	if _, err := EnsureDefaultBlueprint(DefaultBlueprintPath(workdir)); err != nil {
+		t.Fatal(err)
+	}
+	store := NewStore(workdir)
+	plan, err := store.CompileWorkflow(timerWorkflow())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.Triggers) != 1 || plan.Triggers[0].NodeID != "timer" || plan.Triggers[0].Cron != "0 9 * * *" {
+		t.Fatalf("expected timer trigger in compiled plan: %+v", plan.Triggers)
+	}
+
+	run, err := NewDryRunPlanExecutor().Execute(context.Background(), plan, "manual input")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(run.Steps) != 1 || len(run.Steps[0].Inputs) != 1 {
+		t.Fatalf("unexpected timer run steps: %+v", run.Steps)
+	}
+	if run.Steps[0].Inputs[0].Content != "Check CI status." {
+		t.Fatalf("expected timer content to feed agent, got %+v", run.Steps[0].Inputs)
+	}
+}
+
+func TestRunCompiledWorkflowPlanExecutesTemplateTransform(t *testing.T) {
+	workdir := t.TempDir()
+	if _, err := EnsureDefaultBlueprint(DefaultBlueprintPath(workdir)); err != nil {
+		t.Fatal(err)
+	}
+	store := NewStore(workdir)
+	plan, err := store.CompileWorkflow(templateWorkflow())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.Transforms) != 1 || plan.Transforms[0].NodeID != "template" {
+		t.Fatalf("expected template transform in compiled plan: %+v", plan.Transforms)
+	}
+	invoker := &recordingInvoker{}
+	run, err := (PlanExecutor{Invoker: invoker}).Execute(context.Background(), plan, "build the API")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(invoker.invocations) != 1 || len(invoker.invocations[0].Inputs) != 1 {
+		t.Fatalf("unexpected invocations: %+v", invoker.invocations)
+	}
+	if got := invoker.invocations[0].Inputs[0].Content; !strings.Contains(got, "Scheduled request:\nbuild the API") {
+		t.Fatalf("expected templated content to feed agent, got %q", got)
+	}
+	if len(run.Outputs) != 1 || !strings.Contains(run.Outputs[0].Content, "agent=agent") {
+		t.Fatalf("unexpected final output: %+v", run.Outputs)
+	}
+}
+
+func TestRunCompiledWorkflowPlanExecutesSwitchTransformWithoutAgent(t *testing.T) {
+	workdir := t.TempDir()
+	if _, err := EnsureDefaultBlueprint(DefaultBlueprintPath(workdir)); err != nil {
+		t.Fatal(err)
+	}
+	store := NewStore(workdir)
+	plan, err := store.CompileWorkflow(switchWorkflow())
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err := NewDryRunPlanExecutor().Execute(context.Background(), plan, "manual")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(run.Steps) != 0 {
+		t.Fatalf("switch-only workflow should not call agents: %+v", run.Steps)
+	}
+	if len(run.Outputs) != 1 || run.Outputs[0].Content != "Run the daytime prompt." {
+		t.Fatalf("unexpected switch output: %+v", run.Outputs)
+	}
+}
+
+func TestPlanExecutorSchedulesDependenciesIndependentOfPlanOrder(t *testing.T) {
 	executor := PlanExecutor{Invoker: &recordingInvoker{}}
 	plan := WorkflowCompiledPlan{
 		WorkflowID: "review-pipeline",
@@ -107,14 +190,12 @@ func TestPlanExecutorRejectsMissingUpstreamAgentOutput(t *testing.T) {
 	}
 
 	run, err := executor.Execute(context.Background(), plan, "build the API")
-	if err == nil {
-		t.Fatal("expected missing upstream output error")
+	if err != nil {
+		t.Fatal(err)
 	}
-	if !strings.Contains(err.Error(), "missing upstream message developer.output") {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if run.Status != WorkflowRunStatusFailed || len(run.Steps) != 1 || run.Steps[0].NodeID != "reviewer" {
-		t.Fatalf("expected failed reviewer step, got %+v", run)
+	reviewer := workflowRunStepByNodeID(run.Steps, "reviewer")
+	if len(reviewer.Inputs) != 1 || !strings.Contains(reviewer.Inputs[0].Content, "agent=developer") {
+		t.Fatalf("expected reviewer to receive developer output despite plan order: %+v", reviewer)
 	}
 }
 
@@ -160,6 +241,80 @@ func TestPlanExecutorUsesInvokerAndPropagatesResults(t *testing.T) {
 	}
 	if len(run.Outputs) != 1 || run.Outputs[0].Content != "agent=second inputs=1" {
 		t.Fatalf("unexpected final output: %+v", run.Outputs)
+	}
+}
+
+type concurrentProbeInvoker struct {
+	mu        sync.Mutex
+	active    int
+	calls     []string
+	bothReady chan struct{}
+	once      sync.Once
+}
+
+func newConcurrentProbeInvoker() *concurrentProbeInvoker {
+	return &concurrentProbeInvoker{bothReady: make(chan struct{})}
+}
+
+func (i *concurrentProbeInvoker) InvokeAgent(ctx context.Context, invocation AgentInvocation) (AgentInvocationResult, error) {
+	i.mu.Lock()
+	i.active++
+	i.calls = append(i.calls, invocation.Run.NodeID)
+	if i.active == 2 {
+		i.once.Do(func() { close(i.bothReady) })
+	}
+	i.mu.Unlock()
+
+	select {
+	case <-i.bothReady:
+	case <-ctx.Done():
+		return AgentInvocationResult{}, ctx.Err()
+	}
+	return AgentInvocationResult{Content: "done:" + invocation.Run.NodeID}, nil
+}
+
+func TestPlanExecutorRunsIndependentAgentsConcurrently(t *testing.T) {
+	invoker := newConcurrentProbeInvoker()
+	executor := PlanExecutor{Invoker: invoker, Timeout: 200 * time.Millisecond, TimeoutMS: 200}
+	plan := WorkflowCompiledPlan{
+		WorkflowID: "parallel",
+		Name:       "Parallel",
+		AgentRuns: []WorkflowCompiledRun{
+			{
+				NodeID:  "left",
+				Inputs:  []WorkflowCompiledInput{{FromNode: "prompt", FromPort: "message", TargetPort: "input"}},
+				Outputs: []WorkflowCompiledRunOutput{{Port: "output", To: []Endpoint{{Node: "summary", Port: "input"}}}},
+			},
+			{
+				NodeID:  "right",
+				Inputs:  []WorkflowCompiledInput{{FromNode: "prompt", FromPort: "message", TargetPort: "input"}},
+				Outputs: []WorkflowCompiledRunOutput{{Port: "output", To: []Endpoint{{Node: "summary", Port: "input"}}}},
+			},
+			{
+				NodeID: "summary",
+				Inputs: []WorkflowCompiledInput{
+					{FromNode: "left", FromPort: "output", TargetPort: "input"},
+					{FromNode: "right", FromPort: "output", TargetPort: "input"},
+				},
+				Outputs: []WorkflowCompiledRunOutput{{Port: "output", To: []Endpoint{{Node: "out", Port: "message"}}}},
+			},
+		},
+		Outputs: []WorkflowCompiledOutput{{
+			NodeID: "out",
+			Inputs: []WorkflowCompiledInput{{FromNode: "summary", FromPort: "output", TargetPort: "message"}},
+		}},
+	}
+
+	run, err := executor.Execute(context.Background(), plan, "fan out")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(run.Steps) != 3 || run.Steps[0].NodeID != "left" || run.Steps[1].NodeID != "right" || run.Steps[2].NodeID != "summary" {
+		t.Fatalf("expected stable compiled step order: %+v", run.Steps)
+	}
+	summary := workflowRunStepByNodeID(run.Steps, "summary")
+	if len(summary.Inputs) != 2 || !strings.Contains(summary.Inputs[0].Content, "done:left") || !strings.Contains(summary.Inputs[1].Content, "done:right") {
+		t.Fatalf("expected summary to receive both parallel outputs: %+v", summary)
 	}
 }
 
@@ -242,6 +397,92 @@ func TestPlanExecutorTimesOutExternalCommand(t *testing.T) {
 	}
 }
 
+func TestStoreRunWorkflowPlanUsesInjectedExecutorFactory(t *testing.T) {
+	workdir := t.TempDir()
+	if _, err := EnsureDefaultBlueprint(DefaultBlueprintPath(workdir)); err != nil {
+		t.Fatal(err)
+	}
+	store := NewStore(workdir)
+	workflow := DefaultWorkflow()
+	if err := store.WriteWorkflow("review-pipeline", workflow); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := store.SaveCompiledWorkflowPlan(workflow); err != nil {
+		t.Fatal(err)
+	}
+	invoker := &recordingInvoker{}
+	store.SetPlanExecutorFactory(func(request WorkflowPlanRunRequest) (PlanExecutor, string, error) {
+		if request.ExecutionMode != WorkflowExecutionModeBeeAgent {
+			return NewPlanExecutor(request)
+		}
+		timeout, timeoutMS := WorkflowRunTimeout(request)
+		return PlanExecutor{Invoker: invoker, Timeout: timeout, TimeoutMS: timeoutMS}, request.ExecutionMode, nil
+	})
+
+	run, err := store.RunWorkflowPlan(context.Background(), "review-pipeline", WorkflowPlanRunRequest{
+		Input:         "build the API",
+		ExecutionMode: WorkflowExecutionModeBeeAgent,
+		TimeoutMS:     50,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.ExecutionMode != WorkflowExecutionModeBeeAgent || run.TimeoutMS != 50 {
+		t.Fatalf("unexpected run metadata: %+v", run)
+	}
+	if len(invoker.calls) != 3 || strings.Join(invoker.calls, ",") != "developer,reviewer,summary" {
+		t.Fatalf("expected injected invoker calls in workflow order, got %+v", invoker.calls)
+	}
+	if len(run.Outputs) != 1 || !strings.Contains(run.Outputs[0].Content, "agent=summary") {
+		t.Fatalf("unexpected injected run output: %+v", run.Outputs)
+	}
+}
+
+func TestStoreRunDefaultTimerWorkflowWithBeeAgentMode(t *testing.T) {
+	workdir := t.TempDir()
+	if _, err := EnsureDefaultBlueprint(DefaultBlueprintPath(workdir)); err != nil {
+		t.Fatal(err)
+	}
+	store := NewStore(workdir)
+	workflow := DefaultTimerWorkflow()
+	if err := store.WriteWorkflow("timer-ci-check", workflow); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := store.SaveCompiledWorkflowPlan(workflow); err != nil {
+		t.Fatal(err)
+	}
+	invoker := &recordingInvoker{}
+	store.SetPlanExecutorFactory(func(request WorkflowPlanRunRequest) (PlanExecutor, string, error) {
+		if request.ExecutionMode != WorkflowExecutionModeBeeAgent {
+			return NewPlanExecutor(request)
+		}
+		timeout, timeoutMS := WorkflowRunTimeout(request)
+		return PlanExecutor{Invoker: invoker, Timeout: timeout, TimeoutMS: timeoutMS}, request.ExecutionMode, nil
+	})
+
+	run, err := store.RunWorkflowPlan(context.Background(), "timer-ci-check", WorkflowPlanRunRequest{
+		Input:         "manual input should be ignored for timer source",
+		ExecutionMode: WorkflowExecutionModeBeeAgent,
+		TimeoutMS:     50,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.ExecutionMode != WorkflowExecutionModeBeeAgent || len(run.Steps) != 1 {
+		t.Fatalf("unexpected timer bee_agent run: %+v", run)
+	}
+	if len(invoker.invocations) != 1 {
+		t.Fatalf("expected one model invocation, got %+v", invoker.invocations)
+	}
+	inputs := invoker.invocations[0].Inputs
+	if len(inputs) != 1 || inputs[0].FromNode != "timer" || !strings.Contains(inputs[0].Content, "Check CI status") {
+		t.Fatalf("expected timer prompt to feed bee_agent invocation: %+v", inputs)
+	}
+	if len(run.Outputs) != 1 || !strings.Contains(run.Outputs[0].Content, "agent=ci-agent") {
+		t.Fatalf("unexpected timer workflow output: %+v", run.Outputs)
+	}
+}
+
 func TestExampleWorkflowDryInvokerScript(t *testing.T) {
 	scriptPath := filepath.Join("..", "..", "..", "scripts", "workflow-dry-invoker")
 	if _, err := os.Stat(scriptPath); err != nil {
@@ -270,4 +511,13 @@ func TestExampleWorkflowDryInvokerScript(t *testing.T) {
 	if !strings.Contains(result.Content, "build the API") {
 		t.Fatalf("expected script to include invocation input: %+v", result)
 	}
+}
+
+func workflowRunStepByNodeID(steps []WorkflowPlanRunStep, nodeID string) WorkflowPlanRunStep {
+	for _, step := range steps {
+		if step.NodeID == nodeID {
+			return step
+		}
+	}
+	return WorkflowPlanRunStep{}
 }

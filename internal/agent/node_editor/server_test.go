@@ -258,6 +258,22 @@ func TestServerCompositeAPI(t *testing.T) {
 	if len(list.Composites) != 1 || list.Composites[0].ID != "safe-tools" {
 		t.Fatalf("unexpected composite list: %+v", list)
 	}
+
+	req, err = http.NewRequest(http.MethodDelete, server.URL+"/api/composites/safe-tools", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("delete composite status = %d", resp.StatusCode)
+	}
+	if _, err := NewStore(workdir).LoadComposite("safe-tools"); err == nil {
+		t.Fatal("expected deleted composite to be unavailable")
+	}
 }
 
 func TestServerCompositeFromSelectionAPI(t *testing.T) {

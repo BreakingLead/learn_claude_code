@@ -10,9 +10,12 @@ import (
 )
 
 const (
-	WorkflowNodeTypeInput  = "workflow_input"
-	WorkflowNodeTypeAgent  = "workflow_agent"
-	WorkflowNodeTypeOutput = "workflow_output"
+	WorkflowNodeTypeInput    = "workflow_input"
+	WorkflowNodeTypeTimer    = "workflow_timer"
+	WorkflowNodeTypeTemplate = "workflow_template"
+	WorkflowNodeTypeSwitch   = "workflow_switch"
+	WorkflowNodeTypeAgent    = "workflow_agent"
+	WorkflowNodeTypeOutput   = "workflow_output"
 )
 
 type WorkflowDefinition struct {
@@ -139,20 +142,78 @@ func DefaultWorkflow() WorkflowDefinition {
 	}
 }
 
+func DefaultTimerWorkflow() WorkflowDefinition {
+	return WorkflowDefinition{
+		Version: SchemaVersion,
+		ID:      "timer-ci-check",
+		Name:    "Timer CI Check",
+		Nodes: []WorkflowNode{
+			{
+				ID:       "timer",
+				Type:     WorkflowNodeTypeTimer,
+				Label:    "Every 30 Minutes",
+				Position: Position{X: 80, Y: 180},
+				Outputs:  []Port{{ID: "message", Type: PortTypeMessage, Label: "Message", Direction: DirectionOutput}},
+				Config: map[string]any{
+					"cron":   "*/30 * * * *",
+					"prompt": "Check CI status, summarize any failures, and suggest the next concrete action.",
+				},
+			},
+			{
+				ID:             "ci-agent",
+				Type:           WorkflowNodeTypeAgent,
+				Label:          "CI Monitor Agent",
+				AgentBlueprint: "default",
+				Position:       Position{X: 340, Y: 180},
+				Inputs:         []Port{{ID: "input", Type: PortTypeMessage, Label: "Input", Direction: DirectionInput}},
+				Outputs:        []Port{{ID: "output", Type: PortTypeMessage, Label: "Output", Direction: DirectionOutput}},
+				Config: map[string]any{
+					"instruction": "Handle this scheduled CI check. Report status, failing jobs, likely cause, and the smallest useful follow-up.",
+				},
+			},
+			{
+				ID:       "output",
+				Type:     WorkflowNodeTypeOutput,
+				Label:    "CI Summary",
+				Position: Position{X: 620, Y: 180},
+				Inputs:   []Port{{ID: "message", Type: PortTypeMessage, Label: "Message", Direction: DirectionInput}},
+			},
+		},
+		Edges: []Edge{
+			{ID: "edge-timer-ci-agent", Source: Endpoint{Node: "timer", Port: "message"}, Target: Endpoint{Node: "ci-agent", Port: "input"}},
+			{ID: "edge-ci-agent-output", Source: Endpoint{Node: "ci-agent", Port: "output"}, Target: Endpoint{Node: "output", Port: "message"}},
+		},
+		Metadata: map[string]any{
+			"purpose": "default scheduled CI monitor workflow",
+		},
+	}
+}
+
 func DefaultWorkflowPath(workdir string) string {
 	return filepath.Join(workdir, ".agents", "blueprints", "workflows", "review-pipeline.json")
 }
 
+func DefaultTimerWorkflowPath(workdir string) string {
+	return filepath.Join(workdir, ".agents", "blueprints", "workflows", "timer-ci-check.json")
+}
+
 func EnsureDefaultWorkflow(path string) (bool, error) {
+	return ensureWorkflow(path, DefaultWorkflow())
+}
+
+func EnsureDefaultTimerWorkflow(path string) (bool, error) {
+	return ensureWorkflow(path, DefaultTimerWorkflow())
+}
+
+func ensureWorkflow(path string, workflow WorkflowDefinition) (bool, error) {
 	if strings.TrimSpace(path) == "" {
-		return false, fmt.Errorf("default workflow path is required")
+		return false, fmt.Errorf("workflow path is required")
 	}
 	if _, err := os.Stat(path); err == nil {
 		return false, nil
 	} else if !os.IsNotExist(err) {
 		return false, err
 	}
-	workflow := DefaultWorkflow()
 	if err := ValidateWorkflow(workflow); err != nil {
 		return false, err
 	}
@@ -364,7 +425,7 @@ func WorkflowDiagnostics(workflow WorkflowDefinition) []string {
 	var inputNodes []string
 	for _, node := range workflow.Nodes {
 		nodes[node.ID] = node
-		if node.Type == WorkflowNodeTypeInput {
+		if node.Type == WorkflowNodeTypeInput || node.Type == WorkflowNodeTypeTimer {
 			inputNodes = append(inputNodes, node.ID)
 		}
 	}
@@ -389,9 +450,19 @@ func WorkflowDiagnostics(workflow WorkflowDefinition) []string {
 			if workflowNodeInstruction(node) == "" {
 				diagnostics = append(diagnostics, fmt.Sprintf("agent node %q has no local instruction", node.ID))
 			}
-		case WorkflowNodeTypeInput:
+		case WorkflowNodeTypeInput, WorkflowNodeTypeTimer:
 			if outgoing[node.ID] == 0 {
-				diagnostics = append(diagnostics, fmt.Sprintf("input node %q is not connected", node.ID))
+				diagnostics = append(diagnostics, fmt.Sprintf("trigger node %q is not connected", node.ID))
+			}
+			if node.Type == WorkflowNodeTypeTimer && strings.TrimSpace(workflowTimerCron(node)) == "" {
+				diagnostics = append(diagnostics, fmt.Sprintf("timer node %q has no cron expression", node.ID))
+			}
+		case WorkflowNodeTypeTemplate, WorkflowNodeTypeSwitch:
+			if incoming[node.ID] == 0 {
+				diagnostics = append(diagnostics, fmt.Sprintf("transform node %q has no incoming message", node.ID))
+			}
+			if outgoing[node.ID] == 0 {
+				diagnostics = append(diagnostics, fmt.Sprintf("transform node %q has no outgoing message", node.ID))
 			}
 		case WorkflowNodeTypeOutput:
 			if incoming[node.ID] == 0 {
@@ -407,7 +478,7 @@ func WorkflowDiagnostics(workflow WorkflowDefinition) []string {
 
 func validateWorkflowNode(node WorkflowNode) error {
 	switch node.Type {
-	case WorkflowNodeTypeInput, WorkflowNodeTypeOutput:
+	case WorkflowNodeTypeInput, WorkflowNodeTypeTimer, WorkflowNodeTypeTemplate, WorkflowNodeTypeSwitch, WorkflowNodeTypeOutput:
 	case WorkflowNodeTypeAgent:
 		if strings.TrimSpace(node.AgentBlueprint) == "" {
 			return fmt.Errorf("workflow agent node %q requires agent_blueprint", node.ID)
@@ -502,6 +573,12 @@ func workflowSimulationContent(node WorkflowNode, inputs []WorkflowSimulationInp
 	switch node.Type {
 	case WorkflowNodeTypeInput:
 		return input
+	case WorkflowNodeTypeTimer:
+		return workflowTimerPrompt(node)
+	case WorkflowNodeTypeTemplate:
+		return renderWorkflowTemplate(workflowTemplateText(node), inputs)
+	case WorkflowNodeTypeSwitch:
+		return workflowSwitchContent(node, inputs)
 	case WorkflowNodeTypeAgent:
 		var from []string
 		for _, input := range inputs {
@@ -539,6 +616,82 @@ func endpointKey(endpoint Endpoint) string {
 
 func workflowNodeInstruction(node WorkflowNode) string {
 	return stringNodeConfig(node.Config, "instruction")
+}
+
+func workflowTimerCron(node WorkflowNode) string {
+	return stringNodeConfig(node.Config, "cron")
+}
+
+func workflowTimerPrompt(node WorkflowNode) string {
+	prompt := stringNodeConfig(node.Config, "prompt")
+	if prompt == "" {
+		prompt = "Scheduled workflow trigger."
+	}
+	return prompt
+}
+
+func workflowTemplateText(node WorkflowNode) string {
+	template := stringNodeConfig(node.Config, "template")
+	if strings.TrimSpace(template) == "" {
+		template = "{{inputs}}"
+	}
+	return template
+}
+
+func renderWorkflowTemplate(template string, inputs []WorkflowSimulationInput) string {
+	var values []string
+	replacements := map[string]string{}
+	for index, input := range inputs {
+		content := strings.TrimSpace(input.Content)
+		values = append(values, content)
+		replacements[fmt.Sprintf("{{input_%d}}", index+1)] = content
+		replacements["{{"+input.FromNode+"}}"] = content
+		replacements["{{"+input.FromNode+"."+input.FromPort+"}}"] = content
+	}
+	joined := strings.Join(values, "\n\n")
+	replacements["{{input}}"] = ""
+	if len(values) > 0 {
+		replacements["{{input}}"] = values[0]
+	}
+	replacements["{{inputs}}"] = joined
+	result := template
+	keys := make([]string, 0, len(replacements))
+	for key := range replacements {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		result = strings.ReplaceAll(result, key, replacements[key])
+	}
+	return result
+}
+
+func workflowSwitchContent(node WorkflowNode, inputs []WorkflowSimulationInput) string {
+	values := map[string]string{}
+	for _, input := range inputs {
+		values[input.TargetPort] = input.Content
+	}
+	condition := strings.TrimSpace(values["condition"])
+	match := strings.TrimSpace(stringNodeConfig(node.Config, "match"))
+	useTrue := false
+	if match == "" {
+		useTrue = strings.EqualFold(condition, "true") || condition == "1" || strings.EqualFold(condition, "yes")
+	} else {
+		useTrue = strings.Contains(condition, match)
+	}
+	if useTrue {
+		return values["true"]
+	}
+	return values["false"]
+}
+
+func workflowTriggerContent(node WorkflowNode) string {
+	switch node.Type {
+	case WorkflowNodeTypeTimer:
+		return workflowTimerPrompt(node)
+	default:
+		return ""
+	}
 }
 
 func unreachableWorkflowNodes(nodes map[string]WorkflowNode, edges []Edge, roots []string) []string {
