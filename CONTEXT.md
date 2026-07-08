@@ -12,6 +12,10 @@ _Avoid_: Agent workflow, task graph
 A visual or declarative editor for creating an Agent Blueprint.
 _Avoid_: Workflow editor
 
+**Agent Builder Primary Path**:
+The default first-run workflow for creating, validating, and dry-running a single Agent Blueprint.
+_Avoid_: Workflow orchestration, JSON-first editing
+
 **Agent Node**:
 The explicit aggregation node in an Agent Blueprint. Capability Nodes connect into an Agent Node to define one runnable agent instance.
 _Avoid_: Hidden root, implicit agent
@@ -35,6 +39,18 @@ _Avoid_: Agent policy slot
 **Composite Node**:
 A reusable Capability Node packaged from a subgraph of other nodes. It exposes selected input and output ports while hiding the internal graph.
 _Avoid_: Macro, copy-paste group
+
+**Inspector**:
+The contextual editor panel for the selected object in Agent Builder. With no node selected it edits the Agent Blueprint; with a node selected it edits that node.
+_Avoid_: Right JSON panel, properties dump
+
+**JSON Drawer**:
+The advanced bottom drawer that exposes the underlying Agent Builder JSON without occupying the default editing surface.
+_Avoid_: Main editor, primary panel
+
+**Asset Library**:
+The left-side Agent Builder palette organized by user intent, such as instructions, capabilities, constraints, logic, and reusable composites.
+_Avoid_: Node type list, toolbar
 
 **Port**:
 A typed input or output socket on a Blueprint node. Edges connect output ports to input ports only when their port types are compatible.

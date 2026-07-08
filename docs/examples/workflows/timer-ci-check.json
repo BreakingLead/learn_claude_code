@@ -1,0 +1,101 @@
+{
+  "version": 1,
+  "id": "timer-ci-check",
+  "name": "Timer CI Check",
+  "nodes": [
+    {
+      "id": "timer",
+      "type": "workflow_timer",
+      "label": "Every 30 Minutes",
+      "position": {
+        "x": 80,
+        "y": 180
+      },
+      "outputs": [
+        {
+          "id": "message",
+          "type": "message",
+          "label": "Message",
+          "direction": "output"
+        }
+      ],
+      "config": {
+        "cron": "*/30 * * * *",
+        "prompt": "Check CI status, summarize any failures, and suggest the next concrete action."
+      }
+    },
+    {
+      "id": "ci-agent",
+      "type": "workflow_agent",
+      "label": "CI Monitor Agent",
+      "agent_blueprint": "default",
+      "position": {
+        "x": 340,
+        "y": 180
+      },
+      "inputs": [
+        {
+          "id": "input",
+          "type": "message",
+          "label": "Input",
+          "direction": "input"
+        }
+      ],
+      "outputs": [
+        {
+          "id": "output",
+          "type": "message",
+          "label": "Output",
+          "direction": "output"
+        }
+      ],
+      "config": {
+        "instruction": "Handle this scheduled CI check. Report status, failing jobs, likely cause, and the smallest useful follow-up."
+      }
+    },
+    {
+      "id": "output",
+      "type": "workflow_output",
+      "label": "CI Summary",
+      "position": {
+        "x": 620,
+        "y": 180
+      },
+      "inputs": [
+        {
+          "id": "message",
+          "type": "message",
+          "label": "Message",
+          "direction": "input"
+        }
+      ]
+    }
+  ],
+  "edges": [
+    {
+      "id": "edge-timer-ci-agent",
+      "source": {
+        "node": "timer",
+        "port": "message"
+      },
+      "target": {
+        "node": "ci-agent",
+        "port": "input"
+      }
+    },
+    {
+      "id": "edge-ci-agent-output",
+      "source": {
+        "node": "ci-agent",
+        "port": "output"
+      },
+      "target": {
+        "node": "output",
+        "port": "message"
+      }
+    }
+  ],
+  "metadata": {
+    "purpose": "Example workflow that models a scheduled CI monitor trigger."
+  }
+}
