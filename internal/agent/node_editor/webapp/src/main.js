@@ -15,6 +15,7 @@ import {
 } from "@xyflow/react";
 import {
   Boxes,
+  Bell,
   CheckCircle2,
   ClipboardCheck,
   Copy,
@@ -26,6 +27,7 @@ import {
   MessageSquareText,
   Clock,
   GitCompareArrows,
+  Moon,
   Split,
   Play,
   Plus,
@@ -33,7 +35,9 @@ import {
   Save,
   ShieldCheck,
   Sparkles,
+  Sun,
   Trash2,
+  X,
   ChevronDown,
   ChevronRight,
   UserRound,
@@ -86,9 +90,88 @@ function nodeTemplateIcon(template) {
   return templateIcons[template.type] || templateIcons[template.node?.type] || Layers;
 }
 
+function workflowRunFinalText(run) {
+  const outputs = run?.outputs || [];
+  if (outputs.length === 0) {
+    return run?.error || "(no workflow output)";
+  }
+  return outputs.map((output) => output.content || "(empty)").join("\n\n");
+}
+
+function notificationLevel(message, explicitLevel) {
+  if (explicitLevel) return explicitLevel;
+  const text = String(message || "").toLowerCase();
+  if (/\b(failed|failure|error|invalid|rejected|cannot|missing|timeout|denied)\b/.test(text)) return "error";
+  if (/\b(warn|stale|empty|no |not found)\b/.test(text)) return "warning";
+  if (/\b(ready|saved|loaded|valid|created|deleted|connected|compiled|refreshed|downloaded)\b/.test(text)) return "success";
+  return "info";
+}
+
+function notificationSummary(message) {
+  const text = String(message || "");
+  return text.replace(/\s+/g, " ").trim();
+}
+
+function readStoredTheme() {
+  try {
+    const stored = window.localStorage.getItem("bee-agent-builder-theme");
+    return stored === "light" ? "light" : "dark";
+  } catch {
+    return "dark";
+  }
+}
+
+function inlineInputConfigKey(nodeType, portID) {
+  if (nodeType === "select" && portID === "condition") return "default";
+  return portID;
+}
+
+function inlineInputSupported(port) {
+  return port.type === "value" || port.type === "boolean";
+}
+
+function inlineInputValue(data, port) {
+  const key = inlineInputConfigKey(data.type, port.id);
+  const value = data.config?.[key];
+  if (port.type === "boolean") return Boolean(value);
+  return value == null ? "" : String(value);
+}
+
+function stopNodeInputPropagation(event) {
+  event.stopPropagation();
+}
+
 function BlueprintNode({ data }) {
   const inputs = data.inputs || [];
   const outputs = data.outputs || [];
+  const connectedInputs = data.connectedInputs || {};
+  const onConfigPatch = data.onConfigPatch;
+  const renderInlineInput = (port) => {
+    if (connectedInputs[port.id] || !inlineInputSupported(port) || !onConfigPatch) return null;
+    const key = inlineInputConfigKey(data.type, port.id);
+    if (port.type === "boolean") {
+      return React.createElement("select", {
+        className: "port-inline-input",
+        key: "inline-input",
+        value: inlineInputValue(data, port) ? "true" : "false",
+        onMouseDown: stopNodeInputPropagation,
+        onClick: stopNodeInputPropagation,
+        onChange: (event) => onConfigPatch(data.id, { [key]: event.target.value === "true" }),
+      }, [
+        React.createElement("option", { key: "true", value: "true" }, "true"),
+        React.createElement("option", { key: "false", value: "false" }, "false"),
+      ]);
+    }
+    return React.createElement("input", {
+      className: "port-inline-input",
+      key: "inline-input",
+      type: "number",
+      value: inlineInputValue(data, port),
+      onMouseDown: stopNodeInputPropagation,
+      onClick: stopNodeInputPropagation,
+      onChange: (event) => onConfigPatch(data.id, { [key]: event.target.value }),
+    });
+  };
   return React.createElement("div", { className: "node" }, [
     React.createElement("div", { className: "node-title", key: "title" }, [
       data.label,
@@ -110,6 +193,7 @@ function BlueprintNode({ data }) {
             style: { "--port-color": portColors[port.type] || "#7f8da3" },
           }),
           React.createElement("span", { key: "label" }, port.label || port.id),
+          renderInlineInput(port),
         ])
       ),
       ...outputs.map((port, index) =>
@@ -129,13 +213,34 @@ function BlueprintNode({ data }) {
           React.createElement("span", { key: "label" }, port.label || port.id),
         ])
       ),
-    ]),
+      data.type === "compare" && onConfigPatch
+        ? React.createElement("div", { className: "node-config-row", key: "operator" }, [
+            React.createElement("span", { key: "label" }, "Operator"),
+            React.createElement("select", {
+              className: "port-inline-input",
+              key: "operator-select",
+              value: data.config?.operator || ">=",
+              onMouseDown: stopNodeInputPropagation,
+              onClick: stopNodeInputPropagation,
+              onChange: (event) => onConfigPatch(data.id, { operator: event.target.value }),
+            }, [">", ">=", "<", "<=", "==", "!="].map((operator) =>
+              React.createElement("option", { key: operator, value: operator }, operator)
+            )),
+          ])
+        : null,
+    ].filter(Boolean)),
   ]);
 }
 
 const nodeTypes = { blueprint: BlueprintNode };
 
-function toFlowNodes(blueprint) {
+function toFlowNodes(blueprint, options = {}) {
+  const connectedByNode = new Map();
+  for (const edge of blueprint.edges || []) {
+    const ports = connectedByNode.get(edge.target.node) || {};
+    ports[edge.target.port] = true;
+    connectedByNode.set(edge.target.node, ports);
+  }
   return (blueprint.nodes || []).map((node) => ({
     id: node.id,
     type: "blueprint",
@@ -143,8 +248,12 @@ function toFlowNodes(blueprint) {
     data: {
       label: node.label || node.id,
       type: node.type,
+      id: node.id,
+      config: node.config || {},
       inputs: node.inputs,
       outputs: node.outputs,
+      connectedInputs: connectedByNode.get(node.id) || {},
+      onConfigPatch: options.onConfigPatch,
     },
   }));
 }
@@ -266,6 +375,31 @@ function splitTemplates(templates) {
   });
   return { builtin, composites };
 }
+
+function templateIntent(template) {
+  const type = template.node?.type || template.type;
+  if (type === "agent") return "start";
+  if (type === "prompt" || type === "skill") return "instructions";
+  if (type === "toolset" || type === "memory") return "capabilities";
+  if (type === "policy") return "constraints";
+  if (type === "time" || type === "compare" || type === "select") return "logic";
+  if (type === "composite") return "reusable";
+  return "capabilities";
+}
+
+function compositeTemplateID(template) {
+  if (!template || templateIntent(template) !== "reusable") return "";
+  return template.node?.config?.definition || template.id || template.type || "";
+}
+
+const paletteGroups = [
+  { id: "start", label: "Start" },
+  { id: "instructions", label: "Instructions" },
+  { id: "capabilities", label: "Capabilities" },
+  { id: "constraints", label: "Constraints" },
+  { id: "logic", label: "Logic" },
+  { id: "reusable", label: "Reusable" },
+];
 
 function cloneDocument(document) {
   return document ? JSON.parse(JSON.stringify(document)) : null;
@@ -389,6 +523,46 @@ function workflowNode(kind, workflow, agentBlueprint) {
       outputs: [{ id: "message", type: "message", label: "Message", direction: "output" }],
     };
   }
+  if (kind === "workflow-timer") {
+    return {
+      ...base,
+      type: "workflow_timer",
+      label: "Timer",
+      outputs: [{ id: "message", type: "message", label: "Message", direction: "output" }],
+      config: {
+        cron: "0 9 * * *",
+        prompt: "Scheduled workflow trigger.",
+      },
+    };
+  }
+  if (kind === "workflow-template") {
+    return {
+      ...base,
+      type: "workflow_template",
+      label: "Template",
+      inputs: [{ id: "input", type: "message", label: "Input", direction: "input", multiple: true }],
+      outputs: [{ id: "message", type: "message", label: "Message", direction: "output" }],
+      config: {
+        template: "Context:\n{{inputs}}\n\nTask:",
+      },
+    };
+  }
+  if (kind === "workflow-switch") {
+    return {
+      ...base,
+      type: "workflow_switch",
+      label: "Switch",
+      inputs: [
+        { id: "condition", type: "message", label: "Condition", direction: "input" },
+        { id: "true", type: "message", label: "True", direction: "input" },
+        { id: "false", type: "message", label: "False", direction: "input" },
+      ],
+      outputs: [{ id: "message", type: "message", label: "Message", direction: "output" }],
+      config: {
+        match: "true",
+      },
+    };
+  }
   if (kind === "workflow-output") {
     return {
       ...base,
@@ -409,9 +583,12 @@ function workflowNode(kind, workflow, agentBlueprint) {
 }
 
 function App() {
+  const [theme, setTheme] = useState(readStoredTheme);
   const [blueprint, setBlueprint] = useState(null);
   const [source, setSource] = useState("");
-  const [status, setStatus] = useState("loading default blueprint");
+  const [status, setStatusText] = useState("loading default blueprint");
+  const [notifications, setNotifications] = useState([]);
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
   const [selectedNodeId, setSelectedNodeId] = useState("");
@@ -444,15 +621,27 @@ function App() {
   const [workflowExecutionMode, setWorkflowExecutionMode] = useState("dry_run");
   const [workflowExternalCommand, setWorkflowExternalCommand] = useState("./scripts/workflow-dry-invoker");
   const [workflowTimeoutMS, setWorkflowTimeoutMS] = useState(30000);
-  const [paletteSections, setPaletteSections] = useState({ nodes: true, composites: true });
+  const [workflowChatInput, setWorkflowChatInput] = useState("Ask this workflow to process a request.");
+  const [workflowChatMessages, setWorkflowChatMessages] = useState([]);
+  const [workflowChatRunning, setWorkflowChatRunning] = useState(false);
+  const [paletteSections, setPaletteSections] = useState({
+    start: true,
+    instructions: true,
+    capabilities: true,
+    constraints: true,
+    logic: true,
+    reusable: true,
+  });
   const [blueprintUndoStack, setBlueprintUndoStack] = useState([]);
   const blueprintRef = useRef(null);
   const blueprintUndoStackRef = useRef([]);
   const selectedNodeIdRef = useRef("");
   const selectedNodeIdsRef = useRef([]);
-  const panelRef = useRef(null);
-  const [panelInspectorHeight, setPanelInspectorHeight] = useState(260);
-  const [panelResizing, setPanelResizing] = useState(false);
+  const nodeConfigPatchRef = useRef(null);
+  const notificationIDRef = useRef(0);
+  const [jsonDrawerOpen, setJsonDrawerOpen] = useState(false);
+  const [jsonDrawerHeight, setJsonDrawerHeight] = useState(260);
+  const [jsonDrawerResizing, setJsonDrawerResizing] = useState(false);
   const activeWorkflowPlan = workflowPlans.find((plan) => plan.id === activeWorkflowPlanId) || null;
   const activeWorkflowRun = workflowRuns.find((run) => run.id === activeWorkflowRunId) || null;
   const selectedWorkflowNode = (() => {
@@ -465,6 +654,38 @@ function App() {
     }
   })();
   const { builtin: builtinTemplates, composites: compositeTemplates } = splitTemplates(templates);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem("bee-agent-builder-theme", theme);
+    } catch {
+      // Theme persistence is optional; the UI still works if storage is unavailable.
+    }
+  }, [theme]);
+
+  const toggleTheme = useCallback(() => {
+    setTheme((current) => current === "light" ? "dark" : "light");
+  }, []);
+
+  const setStatus = useCallback((message, explicitLevel) => {
+    const text = notificationSummary(message);
+    if (!text) return;
+    const level = notificationLevel(text, explicitLevel);
+    const id = ++notificationIDRef.current;
+    setStatusText(text);
+    setNotifications((items) => [
+      {
+        id,
+        level,
+        text,
+        createdAt: new Date().toLocaleTimeString(),
+      },
+      ...items,
+    ].slice(0, 60));
+    if (level === "error") {
+      setNotificationsOpen(true);
+    }
+  }, []);
 
   const togglePaletteSection = useCallback((section) => {
     setPaletteSections((current) => ({ ...current, [section]: !current[section] }));
@@ -495,7 +716,9 @@ function App() {
     blueprintRef.current = next;
     setBlueprint(next);
     setSource(JSON.stringify(next, null, 2));
-    setNodes(toFlowNodes(next));
+    setNodes(toFlowNodes(next, {
+      onConfigPatch: (nodeID, patch) => nodeConfigPatchRef.current?.(nodeID, patch),
+    }));
     setEdges(toFlowEdges(next));
     setValidationResult(null);
     setBlueprintRunResult(null);
@@ -510,6 +733,28 @@ function App() {
     setSelectedNodeId((id) => id && !(next.nodes || []).some((node) => node.id === id) ? "" : id);
     setSelectedNodeIds((ids) => ids.filter((id) => (next.nodes || []).some((node) => node.id === id)));
   }, [clearBlueprintUndo, updateDocument]);
+
+  const patchNodeConfigByID = useCallback((nodeID, patch) => {
+    const current = blueprintRef.current;
+    if (!current) return;
+    const next = {
+      ...current,
+      nodes: (current.nodes || []).map((node) =>
+        node.id === nodeID
+          ? { ...node, config: { ...(node.config || {}), ...patch } }
+          : node
+      ),
+    };
+    updateDocument(next, "node config updated");
+    if (selectedNodeIdRef.current === nodeID) {
+      const updated = (next.nodes || []).find((node) => node.id === nodeID);
+      setConfigDraft(JSON.stringify(updated?.config || {}, null, 2));
+    }
+  }, [updateDocument]);
+
+  useEffect(() => {
+    nodeConfigPatchRef.current = patchNodeConfigByID;
+  }, [patchNodeConfigByID]);
 
   const restoreBlueprintSnapshot = useCallback((snapshot) => {
     if (!snapshot?.document) return;
@@ -535,6 +780,35 @@ function App() {
     restoreBlueprintSnapshot(snapshot);
     return true;
   }, [editorMode, restoreBlueprintSnapshot]);
+
+  const deleteSelectedBlueprintNodes = useCallback(() => {
+    const current = blueprintRef.current;
+    if (editorMode !== "blueprint" || !current) return false;
+
+    const selectedIDs = selectedNodeIdsRef.current.length > 0
+      ? selectedNodeIdsRef.current
+      : (selectedNodeIdRef.current ? [selectedNodeIdRef.current] : []);
+    const deletable = new Set(selectedIDs);
+    if (deletable.size === 0) return false;
+
+    deletable.delete(current.root_agent);
+    if (deletable.size === 0) {
+      setStatus("root agent cannot be deleted");
+      return true;
+    }
+
+    const next = {
+      ...current,
+      nodes: (current.nodes || []).filter((node) => !deletable.has(node.id)),
+      edges: (current.edges || []).filter((edge) =>
+        !deletable.has(edge.source.node) && !deletable.has(edge.target.node)
+      ),
+    };
+    updateDocument(next, `deleted ${deletable.size} node${deletable.size === 1 ? "" : "s"}`);
+    setSelectedNodeId("");
+    setSelectedNodeIds([]);
+    return true;
+  }, [editorMode, updateDocument]);
 
   const updateWorkflowDocument = useCallback((next, message) => {
     setWorkflowSource(JSON.stringify(next, null, 2));
@@ -782,6 +1056,75 @@ function App() {
     }
   };
 
+  const runWorkflowChat = async () => {
+    const input = workflowChatInput.trim();
+    if (!input || workflowChatRunning) return;
+    if (workflowExecutionMode === "external_command" && !workflowExternalCommand.trim()) {
+      setStatus("workflow chat failed: external command is required");
+      return;
+    }
+    const userMessage = { id: `user-${Date.now()}`, role: "user", content: input };
+    setWorkflowChatMessages((messages) => [...messages, userMessage]);
+    setWorkflowChatInput("");
+    setWorkflowSimulationInput(input);
+    setWorkflowChatRunning(true);
+    try {
+      const workflow = JSON.parse(workflowSource);
+      const compileResponse = await fetch(`/api/workflows/${workflow.id}/compiled-plan`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(workflow),
+      });
+      const compileResult = await compileResponse.json();
+      setWorkflowCompileResult(compileResult);
+      if (!compileResponse.ok || !compileResult.ok) {
+        const error = compileResult.error || compileResponse.statusText;
+        setWorkflowChatMessages((messages) => [...messages, { id: `error-${Date.now()}`, role: "assistant", content: `Workflow compile failed: ${error}`, error: true }]);
+        setStatus(`workflow chat compile failed: ${error}`);
+        return;
+      }
+      const workflowID = compileResult.plan?.workflow_id || workflow.id;
+      setCompiledPlanPath(compileResult.path || "");
+      setActiveWorkflowPlanId(workflowID);
+      await loadWorkflowPlans();
+
+      const runResponse = await fetch(`/api/workflow-plans/${workflowID}/run`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          input,
+          execution_mode: workflowExecutionMode,
+          external_command: workflowExternalCommand.trim() ? workflowExternalCommand.trim().split(/\s+/) : [],
+          timeout_ms: Number(workflowTimeoutMS) || 30000,
+        }),
+      });
+      const runResult = await runResponse.json();
+      setWorkflowRunResult(runResult);
+      if (runResult.run?.id) {
+        setActiveWorkflowRunId(runResult.run.id);
+        await loadWorkflowRuns(runResult.run.workflow_id || workflowID);
+      }
+      if (!runResponse.ok || !runResult.ok) {
+        const error = runResult.error || runResponse.statusText;
+        const content = runResult.run ? workflowRunFinalText(runResult.run) : `Workflow run failed: ${error}`;
+        setWorkflowChatMessages((messages) => [...messages, { id: `error-${Date.now()}`, role: "assistant", content, error: true }]);
+        setStatus(`workflow chat run failed: ${error}`);
+        return;
+      }
+      setWorkflowChatMessages((messages) => [...messages, {
+        id: runResult.run?.id || `assistant-${Date.now()}`,
+        role: "assistant",
+        content: workflowRunFinalText(runResult.run),
+      }]);
+      setStatus(`workflow chat ready: ${(runResult.run?.steps || []).length} agent steps`);
+    } catch (error) {
+      setWorkflowChatMessages((messages) => [...messages, { id: `error-${Date.now()}`, role: "assistant", content: error.message, error: true }]);
+      setStatus(`workflow chat failed: ${error.message}`);
+    } finally {
+      setWorkflowChatRunning(false);
+    }
+  };
+
   const loadTemplates = useCallback(async () => {
     try {
       const response = await fetch("/api/node-templates");
@@ -823,43 +1166,45 @@ function App() {
 
   useEffect(() => {
     const onKeyDown = (event) => {
-      if (!(event.ctrlKey || event.metaKey) || event.shiftKey || event.key.toLowerCase() !== "z") {
-        return;
-      }
       if (isTextEditingTarget(event.target)) {
         return;
       }
-      if (undoBlueprintEdit()) {
-        event.preventDefault();
+
+      if ((event.ctrlKey || event.metaKey) && !event.shiftKey && event.key.toLowerCase() === "z") {
+        if (undoBlueprintEdit()) {
+          event.preventDefault();
+        }
+        return;
+      }
+
+      if (!event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey && event.key.toLowerCase() === "x") {
+        if (deleteSelectedBlueprintNodes()) {
+          event.preventDefault();
+        }
+        return;
       }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [undoBlueprintEdit]);
+  }, [deleteSelectedBlueprintNodes, undoBlueprintEdit]);
 
   useEffect(() => {
-    if (!panelResizing) return undefined;
+    if (!jsonDrawerResizing) return undefined;
     const move = (event) => {
-      const panel = panelRef.current;
-      if (!panel) return;
-      const rect = panel.getBoundingClientRect();
-      const panelbarHeight = panel.querySelector(".panelbar")?.getBoundingClientRect().height || 44;
-      const minInspector = 120;
-      const minEditor = 160;
-      const next = event.clientY - rect.top - panelbarHeight;
-      const max = Math.max(minInspector, rect.height - panelbarHeight - minEditor);
-      setPanelInspectorHeight(Math.min(Math.max(next, minInspector), max));
+      const next = window.innerHeight - event.clientY;
+      const max = Math.max(220, Math.floor(window.innerHeight * 0.7));
+      setJsonDrawerHeight(Math.min(Math.max(next, 160), max));
     };
-    const stop = () => setPanelResizing(false);
-    document.body.classList.add("panel-resizing");
+    const stop = () => setJsonDrawerResizing(false);
+    document.body.classList.add("drawer-resizing");
     window.addEventListener("mousemove", move);
     window.addEventListener("mouseup", stop);
     return () => {
-      document.body.classList.remove("panel-resizing");
+      document.body.classList.remove("drawer-resizing");
       window.removeEventListener("mousemove", move);
       window.removeEventListener("mouseup", stop);
     };
-  }, [panelResizing]);
+  }, [jsonDrawerResizing]);
 
   const validConnection = useCallback((connection) => {
     if (editorMode === "workflow") {
@@ -1110,7 +1455,9 @@ function App() {
   const openBlueprintPanel = useCallback(() => {
     setEditorMode("blueprint");
     if (blueprint) {
-      setNodes(toFlowNodes(blueprint));
+      setNodes(toFlowNodes(blueprint, {
+        onConfigPatch: (nodeID, patch) => nodeConfigPatchRef.current?.(nodeID, patch),
+      }));
       setEdges(toFlowEdges(blueprint));
     }
   }, [blueprint, setEdges, setNodes]);
@@ -1421,6 +1768,8 @@ function App() {
     if (workflows.length === 0) {
       setStatus("no workflows yet");
       setEditorMode("workflow");
+      setNodes([]);
+      setEdges([]);
       return;
     }
     await loadWorkflow(workflows[0].id);
@@ -1445,6 +1794,29 @@ function App() {
       setStatus("composite saved");
     } catch (error) {
       setStatus(`composite save failed: ${error.message}`);
+    }
+  };
+
+  const deleteComposite = async (id = activeCompositeId) => {
+    if (!id) return;
+    if (!window.confirm(`Delete composite ${id}? Existing blueprints that reference it will fail validation.`)) return;
+    try {
+      const response = await fetch(`/api/composites/${id}`, { method: "DELETE" });
+      const result = await response.json();
+      if (!response.ok || !result.ok) {
+        setStatus(`composite delete failed: ${result.error || response.statusText}`);
+        return;
+      }
+      if (activeCompositeId === id) {
+        setActiveCompositeId("");
+        setCompositeSource("");
+        setEditorMode("blueprint");
+      }
+      await loadComposites();
+      await loadTemplates();
+      setStatus(`composite deleted: ${id}`);
+    } catch (error) {
+      setStatus(`composite delete failed: ${error.message}`);
     }
   };
 
@@ -1670,6 +2042,7 @@ function App() {
     }
     const plan = workflowCompileResult.plan || {};
     const runs = plan.agent_runs || [];
+    const transforms = plan.transform_runs || [];
     return React.createElement("div", { className: "validation", key: "workflow-compile" }, [
       React.createElement("div", { className: "validation-title", key: "title" }, "Compiled workflow"),
       compiledPlanPath
@@ -1688,6 +2061,27 @@ function App() {
         ? React.createElement("div", { className: "diagnostics", key: "diagnostics" },
             plan.diagnostics.map((item) => React.createElement("div", { key: item }, item))
           )
+        : null,
+      transforms.length > 0
+        ? React.createElement("div", { className: "field", key: "transforms" }, [
+            React.createElement("label", { key: "label" }, "Transforms"),
+            ...transforms.map((transform, index) => React.createElement("div", { className: "validation", key: transform.node_id }, [
+              React.createElement("div", { className: "validation-title", key: "title" },
+                `${index + 1}. ${transform.label || transform.node_id}`
+              ),
+              React.createElement("div", { className: "muted", key: "type" }, `type: ${transform.type}`),
+              (transform.inputs || []).length > 0
+                ? React.createElement("pre", { className: "code-preview", key: "inputs" },
+                    `inputs:\n${(transform.inputs || []).map((input) => `- ${input.from_node}.${input.from_port} -> ${transform.node_id}.${input.target_port}`).join("\n")}`
+                  )
+                : null,
+              (transform.outputs || []).length > 0
+                ? React.createElement("pre", { className: "code-preview", key: "outputs" },
+                    `outputs:\n${(transform.outputs || []).map((output) => `- ${transform.node_id}.${output.port} -> ${(output.to || []).map((target) => `${target.node}.${target.port}`).join(", ") || "(end)"}`).join("\n")}`
+                  )
+                : null,
+            ])),
+          ])
         : null,
       ...runs.map((run, index) => React.createElement("div", { className: "validation", key: run.node_id }, [
         React.createElement("div", { className: "validation-title", key: "title" },
@@ -1878,6 +2272,313 @@ function App() {
     }
   };
 
+  const findTemplate = (type) =>
+    [...builtinTemplates, ...compositeTemplates].find((template) => (template.node?.type || template.type) === type);
+
+  const renderAssetLibrary = () => {
+    const templatesByGroup = new Map(paletteGroups.map((group) => [group.id, []]));
+    [...builtinTemplates, ...compositeTemplates].forEach((template) => {
+      const group = templateIntent(template);
+      templatesByGroup.get(group)?.push(template);
+    });
+    return React.createElement("aside", { className: "asset-library", key: "asset-library" }, [
+      React.createElement("div", { className: "asset-library-title", key: "title" }, "Asset Library"),
+      ...paletteGroups.map((group) => {
+        const items = templatesByGroup.get(group.id) || [];
+        const isOpen = paletteSections[group.id] !== false;
+        return React.createElement("div", { className: "asset-group", key: group.id }, [
+          React.createElement("button", {
+            className: "node-palette-section",
+            key: "group-title",
+            type: "button",
+            onClick: () => togglePaletteSection(group.id),
+          }, [
+            iconElement(isOpen ? ChevronDown : ChevronRight, "chevron"),
+            React.createElement("span", { key: "label" }, group.label),
+            group.id === "reusable"
+              ? React.createElement("span", { className: "node-palette-count", key: "count" }, String(items.length))
+              : null,
+          ]),
+          isOpen
+            ? React.createElement("div", { className: "node-palette-items", key: "items" },
+                items.length > 0
+                  ? items.map((template) => {
+                      const isComposite = templateIntent(template) === "reusable";
+                      const compositeID = compositeTemplateID(template);
+                      return React.createElement("button", {
+                        className: `node-palette-button${isComposite ? " composite-asset-button" : ""}`,
+                        key: `add-${template.type}-${template.node?.config?.definition || template.label}`,
+                        title: isComposite
+                          ? `${template.description || template.label}\n右键删除这个 composite。`
+                          : template.description || template.label,
+                        onClick: () => addNode(template),
+                        onContextMenu: isComposite
+                          ? (event) => {
+                              event.preventDefault();
+                              event.stopPropagation();
+                              deleteComposite(compositeID);
+                            }
+                          : undefined,
+                      }, buttonContent(nodeTemplateIcon(template), template.label));
+                    })
+                  : React.createElement("div", { className: "node-palette-empty" },
+                      group.id === "reusable" ? "框选节点后创建 composite。" : "No assets in this group."
+                    )
+              )
+            : null,
+        ]);
+      }),
+    ]);
+  };
+
+  const renderWorkflowAssetLibrary = () => {
+    const workflowNodes = [
+      {
+        kind: "workflow-input",
+        label: "Input",
+        icon: MessageSquareText,
+        description: "Manual message source for a workflow run.",
+      },
+      {
+        kind: "workflow-timer",
+        label: "Timer",
+        icon: Clock,
+        description: "Scheduled message source with cron and prompt config.",
+      },
+      {
+        kind: "workflow-template",
+        label: "Template",
+        icon: MessageSquareText,
+        description: "Local transform that renders a message template from upstream inputs.",
+      },
+      {
+        kind: "workflow-switch",
+        label: "Switch",
+        icon: Split,
+        description: "Local transform that chooses true or false message by matching condition text.",
+      },
+      {
+        kind: "workflow-agent",
+        label: "Agent",
+        icon: UserRound,
+        description: "Agent execution node bound to an Agent Blueprint.",
+      },
+      {
+        kind: "workflow-output",
+        label: "Output",
+        icon: FileJson,
+        description: "Terminal message sink for workflow results.",
+      },
+    ];
+    return React.createElement("aside", { className: "asset-library", key: "workflow-asset-library" }, [
+      React.createElement("div", { className: "asset-library-title", key: "title" }, "Workflow Nodes"),
+      React.createElement("div", { className: "asset-group", key: "nodes" }, [
+        React.createElement("button", {
+          className: "node-palette-section static",
+          key: "group-title",
+          type: "button",
+        }, [
+          iconElement(ChevronDown, "chevron"),
+          React.createElement("span", { key: "label" }, "Message Flow"),
+        ]),
+        React.createElement("div", { className: "node-palette-items", key: "items" },
+          workflowNodes.map((node) =>
+            React.createElement("button", {
+              className: "node-palette-button",
+              key: node.kind,
+              title: node.description,
+              disabled: !workflowSource.trim(),
+              onClick: () => addWorkflowNode(node.kind),
+            }, buttonContent(node.icon, node.label))
+          )
+        ),
+      ]),
+      !workflowSource.trim()
+        ? React.createElement("div", { className: "node-palette-empty", key: "empty" }, "Create or select a workflow before adding nodes.")
+        : null,
+    ]);
+  };
+
+  const renderStarterActions = () => {
+    const starters = [
+      { type: "prompt", label: "Add instruction", icon: MessageSquareText },
+      { type: "toolset", label: "Add tools", icon: Wrench },
+      { type: "memory", label: "Add memory", icon: MemoryStick },
+    ];
+    return React.createElement("div", { className: "starter-actions", key: "starter-actions" },
+      starters.map((starter) => {
+        const template = findTemplate(starter.type);
+        return React.createElement("button", {
+          key: starter.type,
+          disabled: !template,
+          onClick: () => template && addNode(template),
+        }, buttonContent(starter.icon, starter.label));
+      })
+    );
+  };
+
+  const renderNodeInspector = () => {
+    if (!selectedNode) {
+      return null;
+    }
+    return React.createElement("div", { className: "inspector-section", key: "node-inspector" }, [
+      React.createElement("div", { className: "section-heading", key: "heading" }, "Node Inspector"),
+      React.createElement("div", { className: "field", key: "id" }, [
+        React.createElement("label", { key: "label" }, "Node"),
+        React.createElement("input", { key: "input", value: selectedNode.id, readOnly: true }),
+      ]),
+      React.createElement("div", { className: "field", key: "label-field" }, [
+        React.createElement("label", { key: "label" }, "Label"),
+        React.createElement("input", {
+          key: "input",
+          value: selectedNode.label || "",
+          onChange: (event) => updateSelectedNode({ label: event.target.value }),
+        }),
+      ]),
+      selectedNode.type === "agent"
+        ? React.createElement("div", { className: "field", key: "root-agent" }, [
+            React.createElement("label", { key: "label" }, "Root Agent"),
+            React.createElement("div", { className: "actions", key: "actions" }, [
+              React.createElement("span", { className: "muted", key: "state" },
+                blueprint.root_agent === selectedNode.id ? "Current root" : blueprint.root_agent || "(none)"
+              ),
+              React.createElement("button", {
+                key: "set-root",
+                disabled: blueprint.root_agent === selectedNode.id,
+                onClick: setSelectedAgentAsRoot,
+              }, buttonContent(UserRound, "Set Root")),
+            ]),
+          ])
+        : null,
+      selectedNode.config && Object.prototype.hasOwnProperty.call(selectedNode.config, "source")
+        ? React.createElement("div", { className: "field", key: "source-field" }, [
+            React.createElement("label", { key: "label" }, "Source"),
+            React.createElement("input", {
+              key: "input",
+              value: configValue("source"),
+              placeholder: "inline | skill_file | project_files | active_mode",
+              onChange: (event) => patchSelectedConfig({ source: event.target.value }),
+            }),
+          ])
+        : null,
+      selectedNode.config && Object.prototype.hasOwnProperty.call(selectedNode.config, "path")
+        ? React.createElement("div", { className: "field", key: "path-field" }, [
+            React.createElement("label", { key: "label" }, "Path"),
+            React.createElement("input", {
+              key: "input",
+              value: configValue("path"),
+              placeholder: ".agents/skills/name/SKILL.md",
+              onChange: (event) => patchSelectedConfig({ path: event.target.value }),
+            }),
+          ])
+        : null,
+      selectedNode.config && Object.prototype.hasOwnProperty.call(selectedNode.config, "prompt")
+        ? React.createElement("div", { className: "field", key: "prompt-field" }, [
+            React.createElement("label", { key: "label" }, "Prompt"),
+            React.createElement("textarea", {
+              className: "config-editor",
+              key: "textarea",
+              value: configValue("prompt"),
+              spellCheck: "false",
+              onChange: (event) => patchSelectedConfig({ prompt: event.target.value }),
+            }),
+          ])
+        : null,
+      selectedNode.config && Object.prototype.hasOwnProperty.call(selectedNode.config, "tools")
+        ? React.createElement("div", { className: "field", key: "tools-field" }, [
+            React.createElement("label", { key: "label" }, "Tools"),
+            React.createElement("input", {
+              key: "input",
+              value: configValue("tools"),
+              placeholder: "read_file, glob",
+              onChange: (event) => patchSelectedConfig({
+                tools: event.target.value.split(",").map((item) => item.trim()).filter(Boolean),
+              }),
+            }),
+          ])
+        : null,
+      selectedNode.config && Object.prototype.hasOwnProperty.call(selectedNode.config, "allow_tools")
+        ? React.createElement("div", { className: "field", key: "allow-tools-field" }, [
+            React.createElement("label", { key: "label" }, "Allow Tools"),
+            React.createElement("input", {
+              key: "input",
+              value: configValue("allow_tools"),
+              placeholder: "leave empty to allow all upstream tools",
+              onChange: (event) => patchSelectedConfig({
+                allow_tools: event.target.value.split(",").map((item) => item.trim()).filter(Boolean),
+              }),
+            }),
+          ])
+        : null,
+      selectedNode.config && Object.prototype.hasOwnProperty.call(selectedNode.config, "deny_tools")
+        ? React.createElement("div", { className: "field", key: "deny-tools-field" }, [
+            React.createElement("label", { key: "label" }, "Deny Tools"),
+            React.createElement("input", {
+              key: "input",
+              value: configValue("deny_tools"),
+              placeholder: "write_file, edit_file",
+              onChange: (event) => patchSelectedConfig({
+                deny_tools: event.target.value.split(",").map((item) => item.trim()).filter(Boolean),
+              }),
+            }),
+          ])
+        : null,
+      React.createElement("div", { className: "field", key: "config" }, [
+        React.createElement("label", { key: "label" }, "Config JSON"),
+        React.createElement("textarea", {
+          className: "config-editor",
+          key: "textarea",
+          value: configDraft,
+          spellCheck: "false",
+          onChange: (event) => updateSelectedConfig(event.target.value),
+        }),
+      ]),
+      selectedNode.id === blueprint.root_agent
+        ? React.createElement("div", { className: "muted", key: "agent-note" }, "Root agent cannot be deleted.")
+        : React.createElement("button", { key: "delete", onClick: deleteSelectedNode }, buttonContent(Trash2, "Delete Node")),
+    ]);
+  };
+
+  const renderBlueprintInspector = () => {
+    if (selectedNode) {
+      return React.createElement("aside", { className: "panel inspector-panel", key: "inspector" }, [
+        renderNodeInspector(),
+      ]);
+    }
+    return React.createElement("aside", { className: "panel inspector-panel", key: "inspector" }, [
+      React.createElement("div", { className: "section-heading", key: "heading" }, "Blueprint Inspector"),
+      React.createElement("div", { className: "field", key: "blueprint" }, [
+        React.createElement("label", { key: "label" }, "Blueprint"),
+        React.createElement("input", { key: "input", value: blueprint?.name ? `${blueprint.name} (${blueprint.id})` : blueprint?.id || "", readOnly: true }),
+      ]),
+      React.createElement("div", { className: "field", key: "root" }, [
+        React.createElement("label", { key: "label" }, "Root Agent"),
+        React.createElement("input", { key: "input", value: blueprint?.root_agent || "(none)", readOnly: true }),
+      ]),
+      React.createElement("div", { className: "primary-actions", key: "primary-actions" }, [
+        React.createElement("button", { key: "validate", onClick: validate }, buttonContent(CheckCircle2, "Validate")),
+        React.createElement("button", {
+          key: "dry-run",
+          disabled: !source.trim(),
+          onClick: dryRunBlueprint,
+        }, buttonContent(Play, "Dry Run")),
+      ]),
+      React.createElement("button", { className: "secondary-action", key: "save", onClick: save }, buttonContent(Save, "Save Blueprint")),
+      React.createElement("div", { className: "field", key: "dry-run-input" }, [
+        React.createElement("label", { key: "label" }, "Dry-run input"),
+        React.createElement("textarea", {
+          className: "dry-run-input",
+          key: "input",
+          value: blueprintRunInput,
+          onChange: (event) => setBlueprintRunInput(event.target.value),
+        }),
+      ]),
+      renderStarterActions(),
+      renderBlueprintRunResult(),
+      renderValidationResult(),
+    ]);
+  };
+
   const save = async () => {
     try {
       const next = parseSource();
@@ -1899,9 +2600,53 @@ function App() {
     }
   };
 
-  return React.createElement("div", { className: "app" }, [
-    React.createElement("div", { className: "topbar", key: "topbar" }, [
-      React.createElement("div", { className: "brand", key: "brand" }, "Bee Agent Builder"),
+  const renderGraphCanvas = () =>
+    React.createElement("div", { className: "graph", key: "graph" }, [
+      editorMode === "blueprint"
+        ? React.createElement("div", { className: "selection-help", key: "selection-help" },
+            "按住 Shift 拖拽框选节点"
+          )
+        : null,
+      editorMode === "blueprint" && selectedNodeIds.length > 0
+        ? React.createElement("div", { className: "selection-toolbar", key: "selection-toolbar" }, [
+            React.createElement("div", { className: "selection-toolbar-title", key: "title" },
+              `${selectedNodeIds.length} node${selectedNodeIds.length === 1 ? "" : "s"} selected`
+            ),
+            React.createElement("button", {
+              key: "create-composite",
+              title: "Create a reusable composite from the selected nodes.",
+              onClick: createComposite,
+            }, buttonContent(Boxes, "Create Composite")),
+          ])
+        : null,
+      React.createElement(ReactFlow, {
+          nodes,
+          edges,
+          nodeTypes,
+          onNodesChange,
+          onEdgesChange,
+          onConnect: connect,
+          onEdgesDelete: deleteEdges,
+          onNodeClick: selectNode,
+          onSelectionChange: selectNodes,
+          onPaneClick: () => {
+            setSelectedNodeId("");
+            setSelectedNodeIds([]);
+          },
+          onNodeDragStop: updateNodePosition,
+          isValidConnection: validConnection,
+          selectionKeyCode: "Shift",
+          selectionOnDrag: false,
+          fitView: true,
+        }, [
+          React.createElement(Background, { key: "background", color: theme === "light" ? "#d7c8a8" : "#303746" }),
+          React.createElement(Controls, { key: "controls" }),
+        ]
+      ),
+    ]);
+
+  const renderBlueprintControls = () =>
+    React.createElement("div", { className: "document-controls", key: "blueprint-controls" }, [
       React.createElement("select", {
         key: "blueprint-select",
         value: activeBlueprintId,
@@ -1909,615 +2654,554 @@ function App() {
       }, blueprints.map((item) =>
         React.createElement("option", { key: item.id, value: item.id }, item.name ? `${item.name} (${item.id})` : item.id)
       )),
-      React.createElement("div", { className: "actions", key: "blueprint-actions" }, [
-        React.createElement("button", { key: "new", onClick: () => createBlueprint("") }, buttonContent(Plus, "New")),
+      React.createElement("button", { key: "new", onClick: () => createBlueprint("") }, buttonContent(Plus, "New")),
+      React.createElement("button", {
+        key: "duplicate",
+        disabled: !activeBlueprintId,
+        onClick: () => createBlueprint(activeBlueprintId),
+      }, buttonContent(Copy, "Duplicate")),
+      React.createElement("button", { key: "expand", onClick: expandComposites }, buttonContent(Layers, "Expand Composites")),
+      React.createElement("button", {
+        key: "composites",
+        onClick: () => openCompositePanel().catch((error) => setStatus(`composite load failed: ${error.message}`)),
+      }, buttonContent(Boxes, "Composites")),
+      React.createElement("button", {
+        key: "json",
+        onClick: () => setJsonDrawerOpen((open) => !open),
+      }, buttonContent(FileJson, jsonDrawerOpen ? "Hide JSON" : "Show JSON")),
+    ]);
+
+  const renderCompositeInspector = () =>
+    React.createElement("aside", { className: "panel inspector-panel", key: "composite-inspector" }, [
+      React.createElement("div", { className: "section-heading", key: "heading" }, "Composite Assets"),
+      composites.length > 0
+        ? React.createElement("div", { className: "field", key: "composite-select" }, [
+            React.createElement("label", { key: "label" }, "Composite"),
+            React.createElement("select", {
+              key: "select",
+              value: activeCompositeId,
+              onChange: (event) => loadComposite(event.target.value).catch((error) => setStatus(`composite load failed: ${error.message}`)),
+            }, composites.map((item) =>
+              React.createElement("option", { key: item.id, value: item.id }, item.name ? `${item.name} (${item.id})` : item.id)
+            )),
+          ])
+        : React.createElement("div", { className: "muted", key: "empty" }, "No composites yet."),
+      React.createElement("div", { className: "muted", key: "help" }, activeCompositeId
+        ? "Edit the reusable composite definition in the JSON drawer. Saving refreshes node templates."
+        : "Create composites by selecting nodes on the Agents canvas."
+      ),
+      React.createElement("button", {
+        key: "open-json",
+        disabled: !activeCompositeId,
+        onClick: () => setJsonDrawerOpen(true),
+      }, buttonContent(FileJson, "Edit JSON")),
+      React.createElement("button", {
+        key: "save-composite",
+        disabled: !compositeSource.trim(),
+        onClick: saveComposite,
+      }, buttonContent(Save, "Save Composite")),
+      React.createElement("button", {
+        key: "delete-composite",
+        disabled: !activeCompositeId,
+        onClick: deleteComposite,
+      }, buttonContent(Trash2, "Delete Composite")),
+    ]);
+
+  const renderWorkflowControls = () =>
+    React.createElement("div", { className: "document-controls", key: "workflow-controls" }, [
+      workflows.length > 0
+        ? React.createElement("select", {
+            key: "workflow-select",
+            value: activeWorkflowId,
+            onChange: (event) => loadWorkflow(event.target.value).catch((error) => setStatus(`workflow load failed: ${error.message}`)),
+          }, workflows.map((item) =>
+            React.createElement("option", { key: item.id, value: item.id }, item.name ? `${item.name} (${item.id})` : item.id)
+          ))
+        : null,
+      React.createElement("button", { key: "new-workflow", onClick: () => createWorkflow("") }, buttonContent(Plus, "New Workflow")),
+      React.createElement("button", {
+        key: "duplicate-workflow",
+        disabled: !activeWorkflowId,
+        onClick: () => createWorkflow(activeWorkflowId),
+      }, buttonContent(Copy, "Duplicate Workflow")),
+      React.createElement("button", {
+        key: "delete-workflow",
+        disabled: !activeWorkflowId,
+        onClick: deleteWorkflow,
+      }, buttonContent(Trash2, "Delete Workflow")),
+      React.createElement("button", {
+        key: "json",
+        onClick: () => setJsonDrawerOpen((open) => !open),
+      }, buttonContent(FileJson, jsonDrawerOpen ? "Hide JSON" : "Show JSON")),
+    ]);
+
+  const renderWorkflowChat = () =>
+    React.createElement("div", { className: "workflow-chat validation", key: "workflow-chat" }, [
+      React.createElement("div", { className: "validation-title", key: "title" }, "Workflow Chat"),
+      React.createElement("div", { className: "workflow-chat-log", key: "log" },
+        workflowChatMessages.length > 0
+          ? workflowChatMessages.map((message) =>
+              React.createElement("div", {
+                className: `workflow-chat-message ${message.role}${message.error ? " error" : ""}`,
+                key: message.id,
+              }, [
+                React.createElement("div", { className: "workflow-chat-role", key: "role" },
+                  message.role === "user" ? "User" : "Workflow"
+                ),
+                React.createElement("pre", { className: "workflow-chat-content", key: "content" }, message.content || "(empty)"),
+              ])
+            )
+          : React.createElement("div", { className: "muted", key: "empty" }, "No workflow chat messages yet.")
+      ),
+      React.createElement("textarea", {
+        className: "workflow-chat-input",
+        key: "input",
+        value: workflowChatInput,
+        spellCheck: "false",
+        disabled: workflowChatRunning || !workflowSource.trim(),
+        onChange: (event) => setWorkflowChatInput(event.target.value),
+      }),
+      React.createElement("div", { className: "actions", key: "actions" }, [
         React.createElement("button", {
-          key: "duplicate",
-          disabled: !activeBlueprintId,
-          onClick: () => createBlueprint(activeBlueprintId),
-        }, buttonContent(Copy, "Duplicate")),
+          key: "send",
+          disabled: workflowChatRunning || !workflowSource.trim() || !workflowChatInput.trim() || (workflowExecutionMode === "external_command" && !workflowExternalCommand.trim()),
+          onClick: runWorkflowChat,
+        }, buttonContent(Play, workflowChatRunning ? "Running" : "Send")),
+        React.createElement("button", {
+          key: "clear",
+          disabled: workflowChatRunning || workflowChatMessages.length === 0,
+          onClick: () => setWorkflowChatMessages([]),
+        }, buttonContent(Trash2, "Clear")),
       ]),
+    ]);
+
+  const renderWorkflowInspector = () =>
+    React.createElement("aside", { className: "panel inspector-panel", key: "workflow-inspector" }, [
+      React.createElement("div", { className: "section-heading", key: "heading" }, "Workflow Inspector"),
+      React.createElement("div", { className: "primary-actions", key: "workflow-primary-actions" }, [
+        React.createElement("button", {
+          key: "validate-workflow",
+          disabled: !workflowSource.trim(),
+          onClick: validateWorkflow,
+        }, buttonContent(CheckCircle2, "Validate")),
+        React.createElement("button", {
+          key: "simulate-workflow",
+          disabled: !workflowSource.trim(),
+          onClick: simulateWorkflow,
+        }, buttonContent(Play, "Simulate")),
+      ]),
+      React.createElement("div", { className: "actions", key: "workflow-secondary-actions" }, [
+        React.createElement("button", {
+          key: "compile-workflow",
+          disabled: !workflowSource.trim(),
+          onClick: compileWorkflow,
+        }, buttonContent(ListChecks, "Compile")),
+        React.createElement("button", {
+          key: "save-compiled-workflow",
+          disabled: !workflowSource.trim(),
+          onClick: saveCompiledWorkflowPlan,
+        }, buttonContent(Save, "Save Plan")),
+        React.createElement("button", {
+          key: "save-workflow",
+          disabled: !workflowSource.trim(),
+          onClick: saveWorkflow,
+        }, buttonContent(Save, "Save Workflow")),
+      ]),
+      renderWorkflowChat(),
+      workflowPlans.length > 0
+        ? React.createElement("div", { className: "field", key: "workflow-plan" }, [
+            React.createElement("label", { key: "label" }, "Compiled Plan"),
+            React.createElement("select", {
+              key: "select",
+              value: activeWorkflowPlanId,
+              onChange: (event) => setActiveWorkflowPlanId(event.target.value),
+            }, workflowPlans.map((item) =>
+              React.createElement("option", { key: item.id, value: item.id },
+                `${item.name ? `${item.name} plan (${item.id})` : item.id}${item.stale ? " stale" : ""}`
+              )
+            )),
+            React.createElement("div", { className: "actions", key: "actions" }, [
+              React.createElement("button", {
+                key: "load-workflow-plan",
+                title: activeWorkflowPlan?.stale ? "Saved plan is older than the current workflow JSON." : "Load saved compiled workflow plan.",
+                disabled: !activeWorkflowPlanId,
+                onClick: () => loadWorkflowPlan(activeWorkflowPlanId).catch((error) => setStatus(`workflow plan load failed: ${error.message}`)),
+              }, buttonContent(ClipboardCheck, "Load")),
+              React.createElement("button", {
+                key: "refresh-workflow-plan",
+                disabled: !activeWorkflowPlanId,
+                onClick: refreshWorkflowPlan,
+              }, buttonContent(RefreshCw, "Refresh")),
+              React.createElement("button", {
+                key: "run-workflow-plan",
+                disabled: !activeWorkflowPlanId || (workflowExecutionMode === "external_command" && !workflowExternalCommand.trim()),
+                onClick: runWorkflowPlan,
+              }, buttonContent(Play, "Run")),
+              React.createElement("button", {
+                key: "delete-workflow-plan",
+                disabled: !activeWorkflowPlanId,
+                onClick: deleteWorkflowPlan,
+              }, buttonContent(Trash2, "Delete")),
+            ]),
+          ])
+        : null,
+      React.createElement("div", { className: "field", key: "workflow-runs" }, [
+        React.createElement("label", { key: "label" }, "Run History"),
+        React.createElement("select", {
+          key: "select",
+          value: activeWorkflowRunId,
+          onChange: (event) => setActiveWorkflowRunId(event.target.value),
+        }, [
+          React.createElement("option", { key: "empty", value: "" }, workflowRuns.length ? "Select run" : "No runs"),
+          ...workflowRuns.map((run) =>
+            React.createElement("option", {
+              key: run.id,
+              value: run.id,
+              title: [run.failed_step_error || run.error || "", (run.external_command || []).join(" ")]
+                .filter(Boolean)
+                .join("\n"),
+            }, formatWorkflowRunOption(run))
+          ),
+        ]),
+        React.createElement("div", { className: "actions", key: "actions" }, [
+          React.createElement("button", {
+            key: "load",
+            disabled: !activeWorkflowPlanId || !activeWorkflowRunId,
+            title: activeWorkflowRun?.output || "Load saved workflow run.",
+            onClick: () => loadWorkflowRun(activeWorkflowPlanId, activeWorkflowRunId).catch((error) => setStatus(`workflow run load failed: ${error.message}`)),
+          }, buttonContent(ClipboardCheck, "Load Run")),
+          React.createElement("button", {
+            key: "rerun",
+            disabled: !activeWorkflowPlanId || !activeWorkflowRunId,
+            title: "Run the current saved plan with this run's saved input and execution settings.",
+            onClick: rerunWorkflowRun,
+          }, buttonContent(RefreshCw, "Rerun")),
+          React.createElement("button", {
+            key: "report",
+            disabled: !activeWorkflowPlanId || !activeWorkflowRunId,
+            title: "Download this workflow run as a Markdown evidence report.",
+            onClick: downloadWorkflowRunReport,
+          }, buttonContent(FileJson, "Report")),
+          React.createElement("button", {
+            key: "delete",
+            disabled: !activeWorkflowPlanId || !activeWorkflowRunId,
+            title: "Delete saved workflow run.",
+            onClick: deleteWorkflowRun,
+          }, buttonContent(Trash2, "Delete Run")),
+        ]),
+      ]),
+      React.createElement("div", { className: "field", key: "simulation-input" }, [
+        React.createElement("label", { key: "label" }, "Simulation Input"),
+        React.createElement("textarea", {
+          className: "config-editor",
+          key: "textarea",
+          value: workflowSimulationInput,
+          spellCheck: "false",
+          onChange: (event) => setWorkflowSimulationInput(event.target.value),
+        }),
+      ]),
+      React.createElement("div", { className: "field", key: "execution-mode" }, [
+        React.createElement("label", { key: "label" }, "Execution Mode"),
+        React.createElement("select", {
+          key: "select",
+          value: workflowExecutionMode,
+          onChange: (event) => setWorkflowExecutionMode(event.target.value),
+        }, [
+          React.createElement("option", { key: "dry-run", value: "dry_run" }, "dry_run"),
+          React.createElement("option", { key: "bee-agent", value: "bee_agent" }, "bee_agent"),
+          React.createElement("option", { key: "external-command", value: "external_command" }, "external_command"),
+        ]),
+      ]),
+      React.createElement("div", { className: "field", key: "execution-timeout" }, [
+        React.createElement("label", { key: "label" }, "Timeout Ms"),
+        React.createElement("input", {
+          key: "input",
+          type: "number",
+          min: "100",
+          step: "100",
+          value: workflowTimeoutMS,
+          onChange: (event) => setWorkflowTimeoutMS(event.target.value),
+        }),
+      ]),
+      workflowExecutionMode === "external_command"
+        ? React.createElement("div", { className: "field", key: "external-command" }, [
+            React.createElement("label", { key: "label" }, "External Command"),
+            React.createElement("input", {
+              key: "input",
+              value: workflowExternalCommand,
+              spellCheck: "false",
+              placeholder: "./scripts/workflow-agent-invoker",
+              onChange: (event) => setWorkflowExternalCommand(event.target.value),
+            }),
+          ])
+        : null,
+      renderWorkflowValidationResult(),
+      renderWorkflowSimulationResult(),
+      renderWorkflowCompileResult(),
+      renderWorkflowRunResult(),
+      selectedWorkflowNode
+        ? React.createElement("div", { className: "inspector-section", key: "workflow-node" }, [
+            React.createElement("div", { className: "section-heading", key: "title" }, "Workflow Node"),
+            React.createElement("div", { className: "field", key: "workflow-node-id" }, [
+              React.createElement("label", { key: "label" }, "Node"),
+              React.createElement("input", { key: "input", value: selectedWorkflowNode.id, readOnly: true }),
+            ]),
+            React.createElement("div", { className: "field", key: "workflow-node-label" }, [
+              React.createElement("label", { key: "label" }, "Label"),
+              React.createElement("input", {
+                key: "input",
+                value: selectedWorkflowNode.label || "",
+                onChange: (event) => updateSelectedWorkflowNode({ label: event.target.value }),
+              }),
+            ]),
+            selectedWorkflowNode.type === "workflow_agent"
+              ? React.createElement("div", { className: "field", key: "workflow-agent-blueprint" }, [
+                  React.createElement("label", { key: "label" }, "Agent Blueprint"),
+                  React.createElement("select", {
+                    key: "select",
+                    value: selectedWorkflowNode.agent_blueprint || "default",
+                    onChange: (event) => updateSelectedWorkflowNode({ agent_blueprint: event.target.value }),
+                  }, blueprints.map((item) =>
+                    React.createElement("option", { key: item.id, value: item.id }, item.name ? `${item.name} (${item.id})` : item.id)
+                  )),
+                ])
+              : null,
+            selectedWorkflowNode.type === "workflow_agent"
+              ? React.createElement("div", { className: "field", key: "workflow-agent-instruction" }, [
+                  React.createElement("label", { key: "label" }, "Instruction"),
+                  React.createElement("textarea", {
+                    className: "config-editor",
+                    key: "textarea",
+                    value: selectedWorkflowNode.config?.instruction || "",
+                    spellCheck: "false",
+                    onChange: (event) => updateSelectedWorkflowNode({
+                      config: { ...(selectedWorkflowNode.config || {}), instruction: event.target.value },
+                    }),
+                  }),
+                ])
+              : null,
+            selectedWorkflowNode.type === "workflow_timer"
+              ? React.createElement("div", { className: "field", key: "workflow-timer-cron" }, [
+                  React.createElement("label", { key: "label" }, "Cron"),
+                  React.createElement("input", {
+                    key: "input",
+                    value: selectedWorkflowNode.config?.cron || "",
+                    placeholder: "0 9 * * *",
+                    onChange: (event) => updateSelectedWorkflowNode({
+                      config: { ...(selectedWorkflowNode.config || {}), cron: event.target.value },
+                    }),
+                  }),
+                ])
+              : null,
+            selectedWorkflowNode.type === "workflow_timer"
+              ? React.createElement("div", { className: "field", key: "workflow-timer-prompt" }, [
+                  React.createElement("label", { key: "label" }, "Prompt"),
+                  React.createElement("textarea", {
+                    className: "config-editor",
+                    key: "textarea",
+                    value: selectedWorkflowNode.config?.prompt || "",
+                    spellCheck: "false",
+                    onChange: (event) => updateSelectedWorkflowNode({
+                      config: { ...(selectedWorkflowNode.config || {}), prompt: event.target.value },
+                    }),
+                  }),
+                ])
+              : null,
+            selectedWorkflowNode.type === "workflow_template"
+              ? React.createElement("div", { className: "field", key: "workflow-template" }, [
+                  React.createElement("label", { key: "label" }, "Template"),
+                  React.createElement("textarea", {
+                    className: "config-editor",
+                    key: "textarea",
+                    value: selectedWorkflowNode.config?.template || "",
+                    spellCheck: "false",
+                    onChange: (event) => updateSelectedWorkflowNode({
+                      config: { ...(selectedWorkflowNode.config || {}), template: event.target.value },
+                    }),
+                  }),
+                  React.createElement("div", { className: "muted", key: "help" }, "Available placeholders: {{input}}, {{inputs}}, {{input_1}}, {{node}}, {{node.port}}."),
+                ])
+              : null,
+            selectedWorkflowNode.type === "workflow_switch"
+              ? React.createElement("div", { className: "field", key: "workflow-switch-match" }, [
+                  React.createElement("label", { key: "label" }, "Match Text"),
+                  React.createElement("input", {
+                    key: "input",
+                    value: selectedWorkflowNode.config?.match || "",
+                    placeholder: "true",
+                    onChange: (event) => updateSelectedWorkflowNode({
+                      config: { ...(selectedWorkflowNode.config || {}), match: event.target.value },
+                    }),
+                  }),
+                  React.createElement("div", { className: "muted", key: "help" }, "If condition contains this text, Switch outputs True; otherwise it outputs False. Empty match uses true/1/yes."),
+                ])
+              : null,
+            React.createElement("button", {
+              key: "delete-workflow-node",
+              onClick: deleteSelectedWorkflowNode,
+            }, buttonContent(Trash2, "Delete Workflow Node")),
+          ])
+        : React.createElement("div", { className: "muted", key: "empty-workflow-selection" }, "Select a workflow node to edit it."),
+    ]);
+
+  const renderJsonEditor = () => {
+    if (editorMode === "workflow") {
+      return React.createElement("textarea", {
+        className: "json-editor",
+        key: "workflow-editor",
+        value: workflowSource,
+        spellCheck: "false",
+        onChange: (event) => updateWorkflowSource(event.target.value),
+      });
+    }
+    if (editorMode === "composite") {
+      return React.createElement("textarea", {
+        className: "json-editor",
+        key: "composite-editor",
+        value: compositeSource,
+        spellCheck: "false",
+        onChange: (event) => setCompositeSource(event.target.value),
+      });
+    }
+    return React.createElement("textarea", {
+      className: "json-editor",
+      key: "editor",
+      value: source,
+      spellCheck: "false",
+      onChange: (event) => {
+        setSource(event.target.value);
+        setValidationResult(null);
+      },
+    });
+  };
+
+  const renderJsonDrawer = () => {
+    if (!jsonDrawerOpen) return null;
+    const title = editorMode === "workflow" ? "Workflow JSON" : editorMode === "composite" ? "Composite JSON" : "Blueprint JSON";
+    return React.createElement("div", {
+      className: "json-drawer",
+      key: "json-drawer",
+      style: { height: `${jsonDrawerHeight}px` },
+    }, [
+      React.createElement("div", {
+        className: "json-drawer-resizer",
+        key: "resizer",
+        role: "separator",
+        "aria-orientation": "horizontal",
+        title: "Drag to resize JSON drawer",
+        onMouseDown: (event) => {
+          event.preventDefault();
+          setJsonDrawerResizing(true);
+        },
+      }),
+      React.createElement("div", { className: "json-drawer-header", key: "header" }, [
+        React.createElement("span", { className: "panel-title", key: "title" }, title),
+        React.createElement("button", { key: "close", onClick: () => setJsonDrawerOpen(false) }, "Close"),
+      ]),
+      renderJsonEditor(),
+    ]);
+  };
+
+  const clearNotifications = () => {
+    setNotifications([]);
+    setNotificationsOpen(false);
+  };
+
+  const renderNotifications = () => {
+    const errorCount = notifications.filter((item) => item.level === "error").length;
+    const warningCount = notifications.filter((item) => item.level === "warning").length;
+    return React.createElement("div", { className: "notification-shell", key: "notifications" }, [
+      React.createElement("button", {
+        className: `notification-button${errorCount ? " has-error" : warningCount ? " has-warning" : ""}`,
+        key: "toggle",
+        title: "Show notifications",
+        onClick: () => setNotificationsOpen((open) => !open),
+      }, [
+        iconElement(Bell),
+        React.createElement("span", { className: "button-label", key: "label" }, String(notifications.length)),
+      ]),
+      notificationsOpen
+        ? React.createElement("div", { className: "notification-popover", key: "popover" }, [
+            React.createElement("div", { className: "notification-header", key: "header" }, [
+              React.createElement("span", { className: "panel-title", key: "title" }, "Notifications"),
+              React.createElement("div", { className: "actions", key: "actions" }, [
+                React.createElement("button", {
+                  key: "clear",
+                  disabled: notifications.length === 0,
+                  onClick: clearNotifications,
+                }, "Clear"),
+                React.createElement("button", {
+                  key: "close",
+                  onClick: () => setNotificationsOpen(false),
+                }, iconElement(X)),
+              ]),
+            ]),
+            React.createElement("div", { className: "notification-list", key: "list" },
+              notifications.length > 0
+                ? notifications.map((item) =>
+                    React.createElement("div", { className: `notification-item ${item.level}`, key: item.id }, [
+                      React.createElement("div", { className: "notification-meta", key: "meta" }, [
+                        React.createElement("span", { key: "level" }, item.level),
+                        React.createElement("span", { key: "time" }, item.createdAt),
+                      ]),
+                      React.createElement("pre", { className: "notification-text", key: "text" }, item.text),
+                    ])
+                  )
+                : React.createElement("div", { className: "muted", key: "empty" }, "No notifications.")
+            ),
+          ])
+        : null,
+    ]);
+  };
+
+  const activeArea = editorMode === "workflow" ? "workflows" : "agents";
+  return React.createElement("div", { className: "app", "data-theme": theme }, [
+    React.createElement("div", { className: "topbar", key: "topbar" }, [
+      React.createElement("div", { className: "brand", key: "brand" }, "Bee Agent Builder"),
+      React.createElement("nav", { className: "topnav", key: "nav", "aria-label": "Builder areas" }, [
+        React.createElement("button", {
+          key: "agents",
+          className: activeArea === "agents" ? "nav-tab active" : "nav-tab",
+          onClick: openBlueprintPanel,
+        }, buttonContent(UserRound, "Agents")),
+        React.createElement("button", {
+          key: "workflows",
+          className: activeArea === "workflows" ? "nav-tab active" : "nav-tab",
+          onClick: () => openWorkflowPanel().catch((error) => setStatus(`workflow load failed: ${error.message}`)),
+        }, buttonContent(GitBranch, "Workflows")),
+      ]),
+      React.createElement("button", {
+        className: "theme-toggle",
+        key: "theme-toggle",
+        title: theme === "light" ? "Switch to dark mode" : "Switch to light mode",
+        onClick: toggleTheme,
+      }, buttonContent(theme === "light" ? Moon : Sun, theme === "light" ? "Dark" : "Light")),
+      renderNotifications(),
       React.createElement("div", { className: "status", key: "status" }, status),
     ]),
-    React.createElement("div", { className: "layout", key: "layout" }, [
-      React.createElement("div", { className: "graph", key: "graph" }, [
-        React.createElement("div", { className: "node-palette", key: "palette" }, [
-          React.createElement("button", {
-            className: "node-palette-section",
-            key: "nodes-title",
-            type: "button",
-            onClick: () => togglePaletteSection("nodes"),
-          }, [
-            iconElement(paletteSections.nodes ? ChevronDown : ChevronRight, "chevron"),
-            React.createElement("span", { key: "label" }, "节点"),
+    activeArea === "agents"
+      ? React.createElement("main", { className: "workspace agents-workspace", key: "agents" }, [
+          renderAssetLibrary(),
+          React.createElement("section", { className: "canvas-column", key: "canvas-column" }, [
+            renderBlueprintControls(),
+            renderGraphCanvas(),
           ]),
-          paletteSections.nodes
-            ? React.createElement("div", { className: "node-palette-items", key: "node-items" },
-                builtinTemplates.map((template) =>
-                  React.createElement("button", {
-                    className: "node-palette-button",
-                    key: `add-${template.type}-${template.node?.config?.definition || template.label}`,
-                    title: template.description || template.label,
-                    onClick: () => addNode(template),
-                  }, buttonContent(nodeTemplateIcon(template), template.label))
-                )
-              )
-            : null,
-          React.createElement("button", {
-            className: "node-palette-section",
-            key: "composites-title",
-            type: "button",
-            onClick: () => togglePaletteSection("composites"),
-          }, [
-            iconElement(paletteSections.composites ? ChevronDown : ChevronRight, "chevron"),
-            React.createElement("span", { key: "label" }, "Composite 资产库"),
-            React.createElement("span", { className: "node-palette-count", key: "count" }, String(compositeTemplates.length)),
-          ]),
-          paletteSections.composites
-            ? React.createElement("div", { className: "node-palette-items", key: "composite-items" },
-                compositeTemplates.length > 0
-                  ? compositeTemplates.map((template) =>
-                      React.createElement("button", {
-                        className: "node-palette-button composite-asset-button",
-                        key: `add-composite-${template.node?.config?.definition || template.label}`,
-                        title: template.description || template.label,
-                        onClick: () => addNode(template),
-                      }, buttonContent(Boxes, template.label))
-                    )
-                  : React.createElement("div", { className: "node-palette-empty" }, "框选节点后创建 composite。")
-              )
-            : null,
-        ]),
-        editorMode === "blueprint"
-          ? React.createElement("div", { className: "selection-help", key: "selection-help" },
-              "按住 Shift 拖拽框选节点"
-            )
-          : null,
-        editorMode === "blueprint" && selectedNodeIds.length > 0
-          ? React.createElement("div", { className: "selection-toolbar", key: "selection-toolbar" }, [
-              React.createElement("div", { className: "selection-toolbar-title", key: "title" },
-                `${selectedNodeIds.length} node${selectedNodeIds.length === 1 ? "" : "s"} selected`
-              ),
-              React.createElement("button", {
-                key: "create-composite",
-                title: "Create a reusable composite from the selected nodes.",
-                onClick: createComposite,
-              }, buttonContent(Boxes, "Create Composite")),
-            ])
-          : null,
-        React.createElement(ReactFlow, {
-            nodes,
-            edges,
-            nodeTypes,
-            onNodesChange,
-            onEdgesChange,
-            onConnect: connect,
-            onEdgesDelete: deleteEdges,
-            onNodeClick: selectNode,
-            onSelectionChange: selectNodes,
-            onPaneClick: () => {
-              setSelectedNodeId("");
-              setSelectedNodeIds([]);
-            },
-            onNodeDragStop: updateNodePosition,
-            isValidConnection: validConnection,
-            selectionKeyCode: "Shift",
-            selectionOnDrag: false,
-            fitView: true,
-          }, [
-            React.createElement(Background, { key: "background", color: "#303746" }),
-            React.createElement(Controls, { key: "controls" }),
-          ]
-        ),
-      ]),
-      React.createElement("div", {
-        className: "panel",
-        key: "panel",
-        ref: panelRef,
-        style: { "--inspector-height": `${panelInspectorHeight}px` },
-      }, [
-        React.createElement("div", { className: "panelbar", key: "panelbar" }, [
-          React.createElement("span", { className: "panel-title", key: "label" },
-            editorMode === "blueprint" ? "Blueprint JSON" : editorMode === "workflow" ? "Workflow JSON" : "Composite JSON"
-          ),
-          React.createElement("div", { className: "actions", key: "actions" }, [
-            React.createElement("button", {
-              key: "blueprint-mode",
-              disabled: editorMode === "blueprint",
-              onClick: openBlueprintPanel,
-            }, buttonContent(FileJson, "Blueprint")),
-            React.createElement("button", {
-              key: "composite-mode",
-              disabled: editorMode === "composite" && composites.length === 0,
-              onClick: () => openCompositePanel().catch((error) => setStatus(`composite load failed: ${error.message}`)),
-            }, buttonContent(Boxes, "Composites")),
-            React.createElement("button", {
-              key: "workflow-mode",
-              disabled: editorMode === "workflow" && workflows.length === 0,
-              onClick: () => openWorkflowPanel().catch((error) => setStatus(`workflow load failed: ${error.message}`)),
-            }, buttonContent(GitBranch, "Workflows")),
-            editorMode === "composite" && composites.length > 0
-              ? React.createElement("select", {
-                  key: "composite-select",
-                  value: activeCompositeId,
-                  onChange: (event) => loadComposite(event.target.value).catch((error) => setStatus(`composite load failed: ${error.message}`)),
-                }, composites.map((item) =>
-                  React.createElement("option", { key: item.id, value: item.id }, item.name ? `${item.name} (${item.id})` : item.id)
-                ))
-              : null,
-            editorMode === "workflow" && workflows.length > 0
-              ? React.createElement("select", {
-                  key: "workflow-select",
-                  value: activeWorkflowId,
-                  onChange: (event) => loadWorkflow(event.target.value).catch((error) => setStatus(`workflow load failed: ${error.message}`)),
-                }, workflows.map((item) =>
-                  React.createElement("option", { key: item.id, value: item.id }, item.name ? `${item.name} (${item.id})` : item.id)
-                ))
-              : null,
-            editorMode === "workflow" && workflowPlans.length > 0
-              ? React.createElement("select", {
-                  key: "workflow-plan-select",
-                  value: activeWorkflowPlanId,
-                  onChange: (event) => setActiveWorkflowPlanId(event.target.value),
-                }, workflowPlans.map((item) =>
-                  React.createElement("option", { key: item.id, value: item.id },
-                    `${item.name ? `${item.name} plan (${item.id})` : item.id}${item.stale ? " stale" : ""}`
-                  )
-                ))
-              : null,
-            editorMode === "workflow"
-              ? React.createElement("button", {
-                  key: "load-workflow-plan",
-                  title: activeWorkflowPlan?.stale ? "Saved plan is older than the current workflow JSON." : "Load saved compiled workflow plan.",
-                  disabled: !activeWorkflowPlanId,
-                  onClick: () => loadWorkflowPlan(activeWorkflowPlanId).catch((error) => setStatus(`workflow plan load failed: ${error.message}`)),
-                }, buttonContent(ClipboardCheck, "Load Plan"))
-              : null,
-            editorMode === "workflow"
-              ? React.createElement("button", {
-                  key: "refresh-workflow-plan",
-                  disabled: !activeWorkflowPlanId,
-                  onClick: refreshWorkflowPlan,
-                }, buttonContent(RefreshCw, "Refresh Plan"))
-              : null,
-            editorMode === "workflow"
-              ? React.createElement("button", {
-                  key: "run-workflow-plan",
-                  disabled: !activeWorkflowPlanId || (workflowExecutionMode === "external_command" && !workflowExternalCommand.trim()),
-                  onClick: runWorkflowPlan,
-                }, buttonContent(Play, "Run Plan"))
-              : null,
-            editorMode === "workflow"
-              ? React.createElement("button", {
-                  key: "delete-workflow-plan",
-                  disabled: !activeWorkflowPlanId,
-                  onClick: deleteWorkflowPlan,
-                }, buttonContent(Trash2, "Delete Plan"))
-              : null,
-            editorMode === "blueprint"
-              ? React.createElement("button", { key: "expand", onClick: expandComposites }, buttonContent(Layers, "Expand Composites"))
-              : null,
-            editorMode === "blueprint"
-              ? React.createElement("button", {
-                  key: "dry-run",
-                  disabled: !source.trim(),
-                  onClick: dryRunBlueprint,
-                }, buttonContent(Play, "Run Blueprint"))
-              : null,
-            editorMode === "blueprint"
-              ? React.createElement("button", { key: "validate", onClick: validate }, buttonContent(CheckCircle2, "Validate"))
-              : null,
-            editorMode === "workflow"
-              ? React.createElement("button", {
-                  key: "validate-workflow",
-                  disabled: !workflowSource.trim(),
-                  onClick: validateWorkflow,
-                }, buttonContent(CheckCircle2, "Validate Workflow"))
-              : null,
-            editorMode === "workflow"
-              ? React.createElement("button", {
-                  key: "simulate-workflow",
-                  disabled: !workflowSource.trim(),
-                  onClick: simulateWorkflow,
-                }, buttonContent(Play, "Simulate Workflow"))
-              : null,
-            editorMode === "workflow"
-              ? React.createElement("button", {
-                  key: "compile-workflow",
-                  disabled: !workflowSource.trim(),
-                  onClick: compileWorkflow,
-                }, buttonContent(ListChecks, "Compile Workflow"))
-              : null,
-            editorMode === "workflow"
-              ? React.createElement("button", {
-                  key: "save-compiled-workflow",
-                  disabled: !workflowSource.trim(),
-                  onClick: saveCompiledWorkflowPlan,
-                }, buttonContent(Save, "Save Plan"))
-              : null,
-            editorMode === "workflow"
-              ? React.createElement("button", {
-                  key: "new-workflow",
-                  onClick: () => createWorkflow(""),
-                }, buttonContent(Plus, "New Workflow"))
-              : null,
-            editorMode === "workflow"
-              ? React.createElement("button", {
-                  key: "duplicate-workflow",
-                  disabled: !activeWorkflowId,
-                  onClick: () => createWorkflow(activeWorkflowId),
-                }, buttonContent(Copy, "Duplicate Workflow"))
-              : null,
-            editorMode === "workflow"
-              ? React.createElement("button", {
-                  key: "delete-workflow",
-                  disabled: !activeWorkflowId,
-                  onClick: deleteWorkflow,
-                }, buttonContent(Trash2, "Delete Workflow"))
-              : null,
-            editorMode === "workflow"
-              ? React.createElement("button", {
-                  key: "add-workflow-input",
-                  disabled: !workflowSource.trim(),
-                  onClick: () => addWorkflowNode("workflow-input"),
-                }, buttonContent(MessageSquareText, "Input"))
-              : null,
-            editorMode === "workflow"
-              ? React.createElement("button", {
-                  key: "add-workflow-agent",
-                  disabled: !workflowSource.trim(),
-                  onClick: () => addWorkflowNode("workflow-agent"),
-                }, buttonContent(UserRound, "Agent"))
-              : null,
-            editorMode === "workflow"
-              ? React.createElement("button", {
-                  key: "add-workflow-output",
-                  disabled: !workflowSource.trim(),
-                  onClick: () => addWorkflowNode("workflow-output"),
-                }, buttonContent(FileJson, "Output"))
-              : null,
-            editorMode === "blueprint"
-              ? React.createElement("button", { key: "save", onClick: save }, buttonContent(Save, "Save"))
-              : editorMode === "workflow"
-              ? React.createElement("button", {
-                  key: "save-workflow",
-                  disabled: !workflowSource.trim(),
-                  onClick: saveWorkflow,
-                }, buttonContent(Save, "Save Workflow"))
-              : React.createElement("button", {
-                  key: "save-composite",
-                  disabled: !compositeSource.trim(),
-                  onClick: saveComposite,
-                }, buttonContent(Save, "Save Composite")),
-          ]),
-        ]),
-        editorMode === "blueprint"
-          ? React.createElement("div", { className: "inspector", key: "inspector" }, [
-              React.createElement("div", { className: "field", key: "dry-run-input" }, [
-                React.createElement("label", { key: "label" }, "Dry-run input"),
-                React.createElement("textarea", {
-                  className: "dry-run-input",
-                  key: "input",
-                  value: blueprintRunInput,
-                  onChange: (event) => setBlueprintRunInput(event.target.value),
-                }),
-              ]),
-              React.createElement("div", { className: "actions", key: "dry-run-actions" }, [
-                React.createElement("button", {
-                  key: "run",
-                  disabled: !source.trim(),
-                  onClick: dryRunBlueprint,
-                }, buttonContent(Play, "Run Blueprint")),
-              ]),
-              renderBlueprintRunResult(),
-              renderValidationResult(),
-              ...(selectedNode
-          ? [
-              React.createElement("div", { className: "field", key: "id" }, [
-                React.createElement("label", { key: "label" }, "Node"),
-                React.createElement("input", { key: "input", value: selectedNode.id, readOnly: true }),
-              ]),
-              React.createElement("div", { className: "field", key: "label-field" }, [
-                React.createElement("label", { key: "label" }, "Label"),
-                React.createElement("input", {
-                  key: "input",
-                  value: selectedNode.label || "",
-                  onChange: (event) => updateSelectedNode({ label: event.target.value }),
-                }),
-              ]),
-              selectedNode.type === "agent"
-                ? React.createElement("div", { className: "field", key: "root-agent" }, [
-                    React.createElement("label", { key: "label" }, "Root Agent"),
-                    React.createElement("div", { className: "actions", key: "actions" }, [
-                      React.createElement("span", { className: "muted", key: "state" },
-                        blueprint.root_agent === selectedNode.id ? "Current root" : blueprint.root_agent || "(none)"
-                      ),
-                      React.createElement("button", {
-                        key: "set-root",
-                        disabled: blueprint.root_agent === selectedNode.id,
-                        onClick: setSelectedAgentAsRoot,
-                      }, buttonContent(UserRound, "Set Root")),
-                    ]),
-                  ])
-                : null,
-              selectedNode.config && Object.prototype.hasOwnProperty.call(selectedNode.config, "source")
-                ? React.createElement("div", { className: "field", key: "source-field" }, [
-                    React.createElement("label", { key: "label" }, "Source"),
-                    React.createElement("input", {
-                      key: "input",
-                      value: configValue("source"),
-                      placeholder: "inline | skill_file | project_files | active_mode",
-                      onChange: (event) => patchSelectedConfig({ source: event.target.value }),
-                    }),
-                  ])
-                : null,
-              selectedNode.config && Object.prototype.hasOwnProperty.call(selectedNode.config, "path")
-                ? React.createElement("div", { className: "field", key: "path-field" }, [
-                    React.createElement("label", { key: "label" }, "Path"),
-                    React.createElement("input", {
-                      key: "input",
-                      value: configValue("path"),
-                      placeholder: ".agents/skills/name/SKILL.md",
-                      onChange: (event) => patchSelectedConfig({ path: event.target.value }),
-                    }),
-                  ])
-                : null,
-              selectedNode.config && Object.prototype.hasOwnProperty.call(selectedNode.config, "prompt")
-                ? React.createElement("div", { className: "field", key: "prompt-field" }, [
-                    React.createElement("label", { key: "label" }, "Prompt"),
-                    React.createElement("textarea", {
-                      className: "config-editor",
-                      key: "textarea",
-                      value: configValue("prompt"),
-                      spellCheck: "false",
-                      onChange: (event) => patchSelectedConfig({ prompt: event.target.value }),
-                    }),
-                  ])
-                : null,
-              selectedNode.config && Object.prototype.hasOwnProperty.call(selectedNode.config, "tools")
-                ? React.createElement("div", { className: "field", key: "tools-field" }, [
-                    React.createElement("label", { key: "label" }, "Tools"),
-                    React.createElement("input", {
-                      key: "input",
-                      value: configValue("tools"),
-                      placeholder: "read_file, glob",
-                      onChange: (event) => patchSelectedConfig({
-                        tools: event.target.value.split(",").map((item) => item.trim()).filter(Boolean),
-                      }),
-                    }),
-                  ])
-                : null,
-              selectedNode.config && Object.prototype.hasOwnProperty.call(selectedNode.config, "allow_tools")
-                ? React.createElement("div", { className: "field", key: "allow-tools-field" }, [
-                    React.createElement("label", { key: "label" }, "Allow Tools"),
-                    React.createElement("input", {
-                      key: "input",
-                      value: configValue("allow_tools"),
-                      placeholder: "leave empty to allow all upstream tools",
-                      onChange: (event) => patchSelectedConfig({
-                        allow_tools: event.target.value.split(",").map((item) => item.trim()).filter(Boolean),
-                      }),
-                    }),
-                  ])
-                : null,
-              selectedNode.config && Object.prototype.hasOwnProperty.call(selectedNode.config, "deny_tools")
-                ? React.createElement("div", { className: "field", key: "deny-tools-field" }, [
-                    React.createElement("label", { key: "label" }, "Deny Tools"),
-                    React.createElement("input", {
-                      key: "input",
-                      value: configValue("deny_tools"),
-                      placeholder: "write_file, edit_file",
-                      onChange: (event) => patchSelectedConfig({
-                        deny_tools: event.target.value.split(",").map((item) => item.trim()).filter(Boolean),
-                      }),
-                    }),
-                  ])
-                : null,
-              React.createElement("div", { className: "field", key: "config" }, [
-                React.createElement("label", { key: "label" }, "Config JSON"),
-                React.createElement("textarea", {
-                  className: "config-editor",
-                  key: "textarea",
-                  value: configDraft,
-                  spellCheck: "false",
-                  onChange: (event) => updateSelectedConfig(event.target.value),
-                }),
-              ]),
-              selectedNode.id === blueprint.root_agent
-                ? React.createElement("div", { className: "muted", key: "agent-note" }, "Root agent cannot be deleted.")
-                : React.createElement("button", { key: "delete", onClick: deleteSelectedNode }, buttonContent(Trash2, "Delete Node")),
-            ]
-          : [React.createElement("div", { className: "muted", key: "empty-selection" }, "Select a node to edit its label and config.")])
-            ])
-          : editorMode === "workflow"
-          ? React.createElement("div", { className: "inspector", key: "workflow-inspector" }, [
-              renderWorkflowValidationResult(),
-              React.createElement("div", { className: "field", key: "workflow-runs" }, [
-                React.createElement("label", { key: "label" }, "Run History"),
-                React.createElement("select", {
-                  key: "select",
-                  value: activeWorkflowRunId,
-                  onChange: (event) => setActiveWorkflowRunId(event.target.value),
-                }, [
-                  React.createElement("option", { key: "empty", value: "" }, workflowRuns.length ? "Select run" : "No runs"),
-                  ...workflowRuns.map((run) =>
-                    React.createElement("option", {
-                      key: run.id,
-                      value: run.id,
-                      title: [run.failed_step_error || run.error || "", (run.external_command || []).join(" ")]
-                        .filter(Boolean)
-                        .join("\n"),
-                    },
-                      formatWorkflowRunOption(run)
-                    )
-                  ),
+          editorMode === "composite" ? renderCompositeInspector() : renderBlueprintInspector(),
+        ])
+      : React.createElement("main", { className: "workspace workflows-workspace", key: "workflows" }, [
+          renderWorkflowAssetLibrary(),
+          React.createElement("section", { className: "canvas-column", key: "workflow-canvas-column" }, [
+            renderWorkflowControls(),
+            workflowSource.trim()
+              ? renderGraphCanvas()
+              : React.createElement("div", { className: "empty-workspace", key: "empty-workflow" }, [
+                  React.createElement("div", { className: "empty-title", key: "title" }, "No workflow selected"),
+                  React.createElement("button", { key: "new", onClick: () => createWorkflow("") }, buttonContent(Plus, "New Workflow")),
                 ]),
-                React.createElement("button", {
-                  key: "load",
-                  disabled: !activeWorkflowPlanId || !activeWorkflowRunId,
-                  title: activeWorkflowRun?.output || "Load saved workflow run.",
-                  onClick: () => loadWorkflowRun(activeWorkflowPlanId, activeWorkflowRunId).catch((error) => setStatus(`workflow run load failed: ${error.message}`)),
-                }, buttonContent(ClipboardCheck, "Load Run")),
-                React.createElement("button", {
-                  key: "rerun",
-                  disabled: !activeWorkflowPlanId || !activeWorkflowRunId,
-                  title: "Run the current saved plan with this run's saved input and execution settings.",
-                  onClick: rerunWorkflowRun,
-                }, buttonContent(RefreshCw, "Rerun")),
-                React.createElement("button", {
-                  key: "report",
-                  disabled: !activeWorkflowPlanId || !activeWorkflowRunId,
-                  title: "Download this workflow run as a Markdown evidence report.",
-                  onClick: downloadWorkflowRunReport,
-                }, buttonContent(FileJson, "Download Report")),
-                React.createElement("button", {
-                  key: "delete",
-                  disabled: !activeWorkflowPlanId || !activeWorkflowRunId,
-                  title: "Delete saved workflow run.",
-                  onClick: deleteWorkflowRun,
-                }, buttonContent(Trash2, "Delete Run")),
-              ]),
-              React.createElement("div", { className: "field", key: "simulation-input" }, [
-                React.createElement("label", { key: "label" }, "Simulation Input"),
-                React.createElement("textarea", {
-                  className: "config-editor",
-                  key: "textarea",
-                  value: workflowSimulationInput,
-                  spellCheck: "false",
-                  onChange: (event) => setWorkflowSimulationInput(event.target.value),
-                }),
-              ]),
-              React.createElement("div", { className: "field", key: "execution-mode" }, [
-                React.createElement("label", { key: "label" }, "Execution Mode"),
-                React.createElement("select", {
-                  key: "select",
-                  value: workflowExecutionMode,
-                  onChange: (event) => setWorkflowExecutionMode(event.target.value),
-                }, [
-                  React.createElement("option", { key: "dry-run", value: "dry_run" }, "dry_run"),
-                  React.createElement("option", { key: "external-command", value: "external_command" }, "external_command"),
-                ]),
-              ]),
-              React.createElement("div", { className: "field", key: "execution-timeout" }, [
-                React.createElement("label", { key: "label" }, "Timeout Ms"),
-                React.createElement("input", {
-                  key: "input",
-                  type: "number",
-                  min: "100",
-                  step: "100",
-                  value: workflowTimeoutMS,
-                  onChange: (event) => setWorkflowTimeoutMS(event.target.value),
-                }),
-              ]),
-              workflowExecutionMode === "external_command"
-                ? React.createElement("div", { className: "field", key: "external-command" }, [
-                    React.createElement("label", { key: "label" }, "External Command"),
-                    React.createElement("input", {
-                      key: "input",
-                      value: workflowExternalCommand,
-                      spellCheck: "false",
-                      placeholder: "./scripts/workflow-agent-invoker",
-                      onChange: (event) => setWorkflowExternalCommand(event.target.value),
-                    }),
-                  ])
-                : null,
-              renderWorkflowSimulationResult(),
-              renderWorkflowCompileResult(),
-              renderWorkflowRunResult(),
-              React.createElement("div", { className: "muted", key: "help" }, activeWorkflowId
-                ? "Edit the multi-agent workflow DAG JSON. Validation checks typed message ports and cycle-free execution order."
-                : "No workflow selected."),
-              ...(selectedWorkflowNode
-                ? [
-                    React.createElement("div", { className: "field", key: "workflow-node-id" }, [
-                      React.createElement("label", { key: "label" }, "Workflow Node"),
-                      React.createElement("input", { key: "input", value: selectedWorkflowNode.id, readOnly: true }),
-                    ]),
-                    React.createElement("div", { className: "field", key: "workflow-node-label" }, [
-                      React.createElement("label", { key: "label" }, "Label"),
-                      React.createElement("input", {
-                        key: "input",
-                        value: selectedWorkflowNode.label || "",
-                        onChange: (event) => updateSelectedWorkflowNode({ label: event.target.value }),
-                      }),
-                    ]),
-                    selectedWorkflowNode.type === "workflow_agent"
-                      ? React.createElement("div", { className: "field", key: "workflow-agent-blueprint" }, [
-                          React.createElement("label", { key: "label" }, "Agent Blueprint"),
-                          React.createElement("select", {
-                            key: "select",
-                            value: selectedWorkflowNode.agent_blueprint || "default",
-                            onChange: (event) => updateSelectedWorkflowNode({ agent_blueprint: event.target.value }),
-                          }, blueprints.map((item) =>
-                            React.createElement("option", { key: item.id, value: item.id }, item.name ? `${item.name} (${item.id})` : item.id)
-                          )),
-                        ])
-                      : null,
-                    selectedWorkflowNode.type === "workflow_agent"
-                      ? React.createElement("div", { className: "field", key: "workflow-agent-instruction" }, [
-                          React.createElement("label", { key: "label" }, "Instruction"),
-                          React.createElement("textarea", {
-                            className: "config-editor",
-                            key: "textarea",
-                            value: selectedWorkflowNode.config?.instruction || "",
-                            spellCheck: "false",
-                            onChange: (event) => updateSelectedWorkflowNode({
-                              config: { ...(selectedWorkflowNode.config || {}), instruction: event.target.value },
-                            }),
-                          }),
-                        ])
-                      : null,
-                    React.createElement("button", {
-                      key: "delete-workflow-node",
-                      onClick: deleteSelectedWorkflowNode,
-                    }, buttonContent(Trash2, "Delete Workflow Node")),
-                  ]
-                : [React.createElement("div", { className: "muted", key: "empty-workflow-selection" }, "Select a workflow node to edit it.")]),
-            ])
-          : React.createElement("div", { className: "inspector", key: "composite-inspector" },
-              React.createElement("div", { className: "muted" }, activeCompositeId
-                ? "Edit the reusable composite definition directly. Saving refreshes node templates."
-                : "No composite selected.")
-            ),
-        React.createElement("div", {
-          className: "panel-resizer",
-          key: "panel-resizer",
-          role: "separator",
-          "aria-orientation": "horizontal",
-          title: "Drag to resize inspector",
-          onMouseDown: (event) => {
-            event.preventDefault();
-            setPanelResizing(true);
-          },
-        }),
-        editorMode === "blueprint"
-            ? React.createElement("textarea", {
-              className: "json-editor",
-              key: "editor",
-              value: source,
-              spellCheck: "false",
-              onChange: (event) => {
-                setSource(event.target.value);
-                setValidationResult(null);
-              },
-            })
-          : editorMode === "workflow"
-          ? React.createElement("textarea", {
-              className: "json-editor",
-              key: "workflow-editor",
-              value: workflowSource,
-              spellCheck: "false",
-              onChange: (event) => updateWorkflowSource(event.target.value),
-            })
-          : React.createElement("textarea", {
-              className: "json-editor",
-              key: "composite-editor",
-              value: compositeSource,
-              spellCheck: "false",
-              onChange: (event) => setCompositeSource(event.target.value),
-            }),
-      ]),
-    ]),
+          ]),
+          renderWorkflowInspector(),
+        ]),
+    renderJsonDrawer(),
   ]);
 }
 
